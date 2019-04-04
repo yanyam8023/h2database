@@ -1135,7 +1135,7 @@ public class MVStore implements AutoCloseable {
                         "Chunk {0} not found", chunkId);
             }
             c = Chunk.fromString(s);
-            if (c.block == Long.MAX_VALUE) {
+            if (!c.isSaved()) {
                 throw DataUtils.newIllegalStateException(
                         DataUtils.ERROR_FILE_CORRUPT,
                         "Chunk {0} is invalid", chunkId);
@@ -1270,7 +1270,7 @@ public class MVStore implements AutoCloseable {
             if (old == null) {
                 break;
             }
-            if (old.block == Long.MAX_VALUE) {
+            if (!old.isSaved()) {
                 IllegalStateException e = DataUtils.newIllegalStateException(
                         DataUtils.ERROR_INTERNAL,
                         "Last block {0} not stored, possibly due to out-of-memory", old);

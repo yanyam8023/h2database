@@ -278,10 +278,13 @@ public class Chunk {
         return buff.toString().getBytes(StandardCharsets.ISO_8859_1);
     }
 
+    boolean isSaved() {
+        return block != Long.MAX_VALUE;
+    }
+
     @Override
     public String toString() {
         return asString();
     }
-
 }
 
