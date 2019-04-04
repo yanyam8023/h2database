@@ -740,6 +740,10 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         return store;
     }
 
+    protected final boolean isPersistent() {
+        return store.getFileStore() != null && !isVolatile;
+    }
+
     /**
      * Get the map id. Please note the map id may be different after compacting
      * a store.
@@ -1258,7 +1262,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                         tip.page.removePage();
                         tip = tip.parent;
                     }
-                    if (store.getFileStore() != null) {
+                    if (isPersistent()) {
                         store.registerUnsavedPage(unsavedMemoryHolder.value);
                     }
                     assert lockedForUpdate || updatedRootReference.getAppendCounter() == 0;
@@ -1768,7 +1772,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 tip.page.removePage();
                 tip = tip.parent;
             }
-            if (store.getFileStore() != null) {
+            if (isPersistent()) {
                 store.registerUnsavedPage(unsavedMemoryHolder.value);
             }
             return result;
