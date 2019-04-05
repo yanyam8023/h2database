@@ -1018,7 +1018,6 @@ public class MVStore implements AutoCloseable {
                             if (normalShutdown && fileStore != null && !fileStore.isReadOnly()) {
                                 for (MVMap<?, ?> map : maps.values()) {
                                     if (map.isClosed()) {
-                                        map.clear();
                                         deregisterMapRoot(map.getId());
                                     }
                                 }
@@ -2776,8 +2775,7 @@ public class MVStore implements AutoCloseable {
             if (map == null) {
                 map = openMap(name);
             }
-            map.clear();
-            removeMap(name, id, false);
+            removeMap(map, false);
         }
     }
 
