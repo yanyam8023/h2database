@@ -1265,7 +1265,6 @@ public class MVStore implements AutoCloseable {
     private void storeNow() {
         assert storeLock.isHeldByCurrentThread();
         long time = getTimeSinceCreation();
-        freeUnusedIfNeeded(time);
         int currentUnsavedPageCount = unsavedMemory;
         long storeVersion = currentStoreVersion;
         long version = ++currentVersion;
@@ -1348,7 +1347,7 @@ public class MVStore implements AutoCloseable {
                 meta.put(key, Long.toHexString(root));
             }
         }
-        applyFreedSpace(storeVersion);
+
         RootReference metaRootReference = meta.setWriteVersion(version);
         assert metaRootReference != null;
         assert metaRootReference.version == version : metaRootReference.version + " != " + version;
@@ -1453,26 +1452,9 @@ public class MVStore implements AutoCloseable {
      * Try to free unused chunks. This method doesn't directly write, but can
      * change the metadata, and therefore cause a background write.
      */
-    private void freeUnusedIfNeeded(long time) {
-        int freeDelay = retentionTime / 5;
-        /* Bias this decision so most of the time we perform the unused chunk scan on the
-         * background thread. This prevents commits sometimes taking a rather long time.
-         */
-        if (freeUnusedOnBackgroundThread && backgroundWriterThread.get() != null && !isBackgroundThread())
-            return;
-        if (time - lastFreeUnusedChunks >= freeDelay) {
-            // set early in case it fails (out of memory or so)
-            lastFreeUnusedChunks = time;
-            freeUnusedChunks();
-        } else {
-            applyFreedSpace(currentVersion);
-        }
-    }
-
     private void freeUnusedChunks() {
         assert storeLock.isHeldByCurrentThread();
         long version = currentVersion;
-        applyFreedSpace(version);
         if (lastChunk != null && reuseSpace) {
             long oldestVersionToKeep = getOldestVersionToKeep();
             Set<Integer> referenced = collectReferencedChunks(oldestVersionToKeep);
@@ -1484,31 +1466,20 @@ public class MVStore implements AutoCloseable {
                 // due to meta.remove() and meta.put(), we set the following field
                 currentStoreVersion = version;
                 reuseSpace = false;     // to block possible re-entrance into this method
-                for (Iterator<Chunk> iterator = chunks.values().iterator(); iterator.hasNext(); ) {
-                    Chunk c = iterator.next();
-                    if (c.block != Long.MAX_VALUE && c.version < oldestVersionToKeep && !referenced.contains(c.id)) {
-                        if (canOverwriteChunk(c, time, oldestVersionToKeep)) {
-                            iterator.remove();
-                            if (meta.remove(Chunk.getMetaKey(c.id)) != null) {
-                                markMetaChanged();
-                            }
-                            long start = c.block * BLOCK_SIZE;
-                            int length = c.len * BLOCK_SIZE;
-                            fileStore.free(start, length);
-                            assert fileStore.getFileLengthInUse() == measureFileLengthInUse() :
-                                    fileStore.getFileLengthInUse() + " != " + measureFileLengthInUse();
-                        } else {
-                            if (c.unused == 0) {
-                                c.unused = time;
-                                meta.put(Chunk.getMetaKey(c.id), c.asString());
-                                markMetaChanged();
-                            }
+                for (Chunk c : chunks.values()) {
+                    if (c.isSaved() && !referenced.contains(c.id)) {
+                        if (c.unused == 0) {
+                            c.unused = time;
+                            meta.put(Chunk.getMetaKey(c.id), c.asString());
+                            markMetaChanged();
+                        }
+                        if (c.unusedAtVersion == 0) {
+                            c.unusedAtVersion = oldestVersionToKeep;
                         }
                     }
                 }
             } finally {
                 // set it here, to avoid calling it often if it was slow
-                lastFreeUnusedChunks = getTimeSinceCreation();
                 reuseSpace = true;
                 currentStoreVersion = currentStoreVersionBackup;
             }
@@ -1765,46 +1736,6 @@ public class MVStore implements AutoCloseable {
     }
 
     /**
-     * Apply the freed space to the chunk metadata. The metadata is updated, but
-     * completely free chunks are not removed from the set of chunks, and the
-     * disk space is not yet marked as free.
-     */
-    private void applyFreedSpace(long storeVersion) {
-        while (true) {
-            ArrayList<Chunk> modified = new ArrayList<>();
-            synchronized (freedPageSpace) {
-                for (Chunk f : freedPageSpace.values()) {
-                    Chunk c = chunks.get(f.id);
-                    if (c != null) { // skip if was already removed
-                        c.maxLenLive += f.maxLenLive;
-                        c.pageCountLive += f.pageCountLive;
-                        if (c.pageCountLive < 0 && c.pageCountLive > -MARKED_FREE) {
-                            // can happen after a rollback
-                            c.pageCountLive = 0;
-                        }
-                        if (c.maxLenLive < 0 && c.maxLenLive > -MARKED_FREE) {
-                            // can happen after a rollback
-                            c.maxLenLive = 0;
-                        }
-                        if (c.pageCountLive == 0 && c.maxLenLive == 0) {
-                            c.unusedAtVersion = storeVersion;
-                        }
-                        modified.add(c);
-                    }
-                }
-                freedPageSpace.clear();
-            }
-            if (modified.isEmpty()) {
-                break;
-            }
-            for (Chunk c : modified) {
-                meta.put(Chunk.getMetaKey(c.id), c.asString());
-            }
-            markMetaChanged();
-        }
-    }
-
-    /**
      * Shrink the file if possible, and if at least a given percentage can be
      * saved.
      *
@@ -1873,9 +1804,9 @@ public class MVStore implements AutoCloseable {
     }
 
     private boolean hasUnsavedChangesInternal() {
-        if (meta.hasChangesSince(lastStoredVersion)) {
-            return true;
-        }
+//        if (meta.hasChangesSince(lastStoredVersion)) {
+//            return true;
+//        }
         return hasUnsavedChanges();
     }
 
@@ -2150,10 +2081,6 @@ public class MVStore implements AutoCloseable {
             }
         }
         // the fill rate of all chunks combined
-        if (maxLengthSum <= 0) {
-            // avoid division by 0
-            maxLengthSum = 1;
-        }
         int fillRate = (int) (100 * maxLengthLiveSum / maxLengthSum);
         return fillRate;
     }
@@ -2213,6 +2140,12 @@ public class MVStore implements AutoCloseable {
     }
 
     private void compactRewrite(Set<Integer> set) {
+        // this will ensure better recognition of the last chunk
+        // in case of pwer failure, since we are going to move older chunks
+        // to the end of the file
+        writeStoreHeader();
+        sync();
+
         for (MVMap<?, ?> m : maps.values()) {
             @SuppressWarnings("unchecked")
             MVMap<Object, Object> map = (MVMap<Object, Object>) m;
@@ -2221,8 +2154,7 @@ public class MVStore implements AutoCloseable {
             }
         }
         meta.rewrite(set);
-        freeUnusedChunks();
-        commit();
+        store();
     }
 
     private HashSet<Integer> createIdSet(Iterable<Chunk> toCompact) {
