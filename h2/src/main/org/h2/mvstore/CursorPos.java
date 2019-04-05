@@ -8,8 +8,8 @@ package org.h2.mvstore;
 /**
  * A position in a cursor
  */
-public class CursorPos {
-
+public class CursorPos implements RootReference.VisitablePages
+{
     /**
      * The current page.
      */
@@ -31,5 +31,16 @@ public class CursorPos {
         this.parent = parent;
     }
 
+    @Override
+    public void visitPages(RootReference.PageVisitor visitor) {
+        CursorPos cursorPos = this;
+        do {
+            long pagePos = cursorPos.page.getPos();
+            if (DataUtils.isPageSaved(pagePos)) {
+                visitor.visit(pagePos);
+            }
+            cursorPos = cursorPos.parent;
+        } while (cursorPos != null);
+    }
 }
 

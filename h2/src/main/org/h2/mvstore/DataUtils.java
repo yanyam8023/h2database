@@ -536,6 +536,15 @@ public final class DataUtils {
     }
 
     /**
+     * Determines whether specified file position corresponds to a leaf page
+     * @param pos the position
+     * @return true if it is a leaf, false otherwise
+     */
+    public static boolean isLeafPosition(long pos) {
+        return getPageType(pos) == PAGE_TYPE_LEAF;
+    }
+
+    /**
      * Find out if page was saved.
      *
      * @param pos the position

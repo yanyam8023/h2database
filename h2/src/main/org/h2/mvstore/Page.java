@@ -39,7 +39,7 @@ import org.h2.util.Utils;
  * leaf: values (one for each key)
  * node: children (1 more than keys)
  */
-public abstract class Page implements Cloneable
+public abstract class Page implements Cloneable, RootReference.VisitablePages
 {
     /**
      * Map this page belongs to
@@ -933,6 +933,13 @@ public abstract class Page implements Cloneable
      */
     public abstract void removeAllRecursive();
 
+    @Override
+    public void visitPages(RootReference.PageVisitor visitor) {
+        if (isSaved()) {
+            visitor.visit(pos);
+        }
+    }
+
     /**
      * Create array for keys storage.
      *
@@ -1319,6 +1326,22 @@ public abstract class Page implements Cloneable
         protected int calculateMemory() {
             return super.calculateMemory() + PAGE_NODE_MEMORY +
                         getRawChildPageCount() * (MEMORY_POINTER + PAGE_MEMORY_CHILD);
+        }
+
+        @Override
+        public void visitPages(RootReference.PageVisitor visitor) {
+            super.visitPages(visitor);
+            int len = getRawChildPageCount();
+            for (int i = 0; i < len; i++) {
+                long pagePos = getChildPagePos(i);
+                if (DataUtils.isPageSaved(pagePos)) {
+                    if (DataUtils.isLeafPosition(pagePos)) {
+                        visitor.visit(pagePos);
+                    } else {
+                        getChildPage(i).visitPages(visitor);
+                    }
+                }
+            }
         }
 
         @Override

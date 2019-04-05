@@ -417,7 +417,9 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         int attempt = 0;
         do {
             rootReference = getRoot();
-        } while (!updateRoot(rootReference, emptyRootPage, ++attempt));
+            rootReference = getUpdatedRoot(rootReference, emptyRootPage, ++attempt,
+                                            isPersistent() ? rootReference.root : null);
+        } while (rootReference == null);
         rootReference.root.removeAllRecursive();
     }
 
@@ -828,13 +830,23 @@ public class MVMap<K, V> extends AbstractMap<K, V>
      *                             were made to update root
      * @return new RootReference or null if update failed
      */
-    protected final boolean updateRoot(RootReference expectedRootReference, Page newRootPage, int attemptUpdateCounter)
+    protected final boolean updateRoot(RootReference expectedRootReference, Page newRootPage,
+                                       int attemptUpdateCounter, RootReference.VisitablePages removedPages)
+    {
+        return getUpdatedRoot(expectedRootReference, newRootPage, attemptUpdateCounter, removedPages) != null;
+    }
+
+    private RootReference getUpdatedRoot(RootReference expectedRootReference, Page newRootPage,
+                                       int attemptUpdateCounter, RootReference.VisitablePages removedPages)
     {
         RootReference currentRoot = flushAndGetRoot();
-        return currentRoot == expectedRootReference &&
-                !currentRoot.lockedForUpdate &&
-                root.compareAndSet(currentRoot,
-                                    new RootReference(currentRoot, newRootPage, attemptUpdateCounter));
+        if (currentRoot == expectedRootReference && !currentRoot.lockedForUpdate) {
+            RootReference updatedRoot = currentRoot.updateRootPage(newRootPage, attemptUpdateCounter, removedPages);
+            if (root.compareAndSet(currentRoot, updatedRoot)) {
+                return updatedRoot;
+            }
+        }
+        return null;
     }
 
     /**
@@ -1087,7 +1099,13 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 }
                 return rootReference;
             }
-            RootReference updatedRootReference = new RootReference(rootReference, writeVersion, ++attempt);
+
+            RootReference previous = rootReference;
+            RootReference tmp;
+            while ((tmp = previous.previous) != null && tmp.root == rootReference.root && !previous.hasRemovalInfo()) {
+                previous = tmp;
+            }
+            RootReference updatedRootReference = rootReference.updateVersion(previous, writeVersion, ++attempt);
             if(root.compareAndSet(rootReference, updatedRootReference)) {
                 removeUnusedOldVersions(updatedRootReference);
                 return updatedRootReference;
@@ -1253,8 +1271,8 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 }
                 p = replacePage(pos, p, unsavedMemoryHolder);
 
-                RootReference updatedRootReference = new RootReference(rootReference, p, remainingBuffer,
-                        lockedForUpdate);
+                RootReference updatedRootReference = rootReference.updatePageAndLockedStatus(p, remainingBuffer,
+                                                                        lockedForUpdate, tip);
                 if (root.compareAndSet(rootReference, updatedRootReference)) {
                     lockedRootReference = null;
                     while (tip != null) {
@@ -1755,7 +1773,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 }
                 rootPage = replacePage(pos, p, unsavedMemoryHolder);
                 if (lockedRootReference == null) {
-                    if (!updateRoot(rootReference, rootPage, attempt)) {
+                    if (!updateRoot(rootReference, rootPage, attempt, tip)) {
                         decisionMaker.reset();
                         continue;
                     } else {
@@ -1790,7 +1808,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
 
     private RootReference tryLock(RootReference rootReference, int attempt) {
         if (!rootReference.lockedForUpdate) {
-            RootReference lockedRootReference = new RootReference(rootReference, attempt);
+            RootReference lockedRootReference = rootReference.markLocked(attempt);
             if (root.compareAndSet(rootReference, lockedRootReference)) {
                 return lockedRootReference;
             }
@@ -1831,23 +1849,31 @@ public class MVMap<K, V> extends AbstractMap<K, V>
     }
 
     private RootReference unlockRoot() {
-        return unlockRoot(null, -1);
+        return unlockRoot(null, -1, null);
     }
 
     private RootReference unlockRoot(Page newRootPage) {
-        return unlockRoot(newRootPage, -1);
+        return unlockRoot(newRootPage, -1, null);
+    }
+
+    private RootReference unlockRoot(Page newRootPage, RootReference.VisitablePages removedPages) {
+        return unlockRoot(newRootPage, -1, removedPages);
     }
 
     private RootReference unlockRoot(Page newRootPage, int appendCounter) {
+        return unlockRoot(newRootPage, appendCounter, null);
+    }
+
+    private RootReference unlockRoot(Page newRootPage, int appendCounter, RootReference.VisitablePages removedPages) {
         RootReference updatedRootReference;
         boolean success;
         do {
             RootReference rootReference = getRoot();
             assert rootReference.lockedForUpdate;
-            updatedRootReference = new RootReference(rootReference,
+            updatedRootReference = rootReference.updatePageAndLockedStatus(
                                         newRootPage == null ? rootReference.root : newRootPage,
                                         appendCounter == -1 ? rootReference.getAppendCounter() : appendCounter,
-                                        false);
+                                        false, removedPages);
             success = root.compareAndSet(rootReference, updatedRootReference);
         } while(!success);
 
