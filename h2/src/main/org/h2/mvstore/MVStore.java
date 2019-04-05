@@ -2269,20 +2269,54 @@ public class MVStore implements AutoCloseable {
             // values, because in some cases a page is allocated, but never
             // stored, so we need to use max
             unsavedMemory = Math.max(0, unsavedMemory - memory);
-            return;
         }
+    }
 
-        int chunkId = DataUtils.getPageChunkId(pos);
-        // synchronize, because pages could be freed concurrently
-        synchronized (freedPageSpace) {
-            Chunk chunk = freedPageSpace.get(chunkId);
-            if (chunk == null) {
-                chunk = new Chunk(chunkId);
-                freedPageSpace.put(chunkId, chunk);
+    boolean accountForRemovedPages(RootReference.RemovalInfoNode removalInfo, final long version) {
+        final Set<Chunk> modified = new HashSet<>();
+        RootReference.PageVisitor visitor = new RootReference.PageVisitor() {
+            long time;
+            @Override
+            public void visit(long pagePos) {
+                assert DataUtils.isPageSaved(pagePos);
+                if (DataUtils.isPageSaved(pagePos)) {
+                    int chunkId = DataUtils.getPageChunkId(pagePos);
+                    int pageLength = DataUtils.getPageMaxLength(pagePos);
+
+                    Chunk chunk = chunks.get(chunkId);
+                    chunk.maxLenLive -= pageLength;
+                    chunk.pageCountLive -= 1;
+
+                    assert chunk.pageCountLive >= 0 : chunk;
+                    assert chunk.maxLenLive >= 0 : chunk;
+                    assert (chunk.pageCountLive == 0) == (chunk.maxLenLive == 0) : chunk;
+
+                    if (chunk.pageCountLive == 0 && chunk.maxLenLive == 0) {
+                        chunk.unusedAtVersion = version;
+                        if (time == 0) {
+                            time = getTimeSinceCreation();
+                        }
+                        chunk.unused = time;
+                    }
+                    if (chunk.isSaved()) {
+                        modified.add(chunk);
+                    }
+                }
             }
-            chunk.maxLenLive -= DataUtils.getPageMaxLength(pos);
-            chunk.pageCountLive -= 1;
+        };
+
+        while (removalInfo != null) {
+            removalInfo.data.visitPages(visitor);
+            removalInfo = removalInfo.getNext();
         }
+        if (!modified.isEmpty()) {
+            for (Chunk chunk : modified) {
+                meta.put(Chunk.getMetaKey(chunk.id), chunk.asString());
+            }
+            markMetaChanged();
+            return true;
+        }
+        return false;
     }
 
     Compressor getCompressorFast() {
@@ -2751,31 +2785,29 @@ public class MVStore implements AutoCloseable {
             DataUtils.checkArgument(map != meta,
                     "Removing the meta map is not allowed");
             map.close();
-            RootReference rootReference = map.getRoot();
+            RootReference rootReference = map.clearIt();
+            RootReference.RemovalInfoNode removalInfo = rootReference.extractRemovalInfo();
+            if (map.isPersistent() && removalInfo != null) {
+                accountForRemovedPages(removalInfo, currentVersion);
+            }
+
             updateCounter += rootReference.updateCounter;
             updateAttemptCounter += rootReference.updateAttemptCounter;
 
             int id = map.getId();
             String name = getMapName(id);
-            if (!delayed) {
-                map.clear();
+            if (meta.remove(MVMap.getMapKey(id)) != null) {
+                markMetaChanged();
             }
-            removeMap(name, id, delayed);
+            if (meta.remove("name." + name) != null) {
+                markMetaChanged();
+            }
+            if (!delayed) {
+                deregisterMapRoot(id);
+                maps.remove(id);
+            }
         } finally {
             storeLock.unlock();
-        }
-    }
-
-    private void removeMap(String name, int id, boolean delayed) {
-        if (meta.remove(MVMap.getMapKey(id)) != null) {
-            markMetaChanged();
-        }
-        if (meta.remove("name." + name) != null) {
-            markMetaChanged();
-        }
-        if (!delayed) {
-            deregisterMapRoot(id);
-            maps.remove(id);
         }
     }
 

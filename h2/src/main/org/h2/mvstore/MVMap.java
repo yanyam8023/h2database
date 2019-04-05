@@ -412,6 +412,10 @@ public class MVMap<K, V> extends AbstractMap<K, V>
      */
     @Override
     public void clear() {
+        clearIt();
+    }
+
+    RootReference clearIt() {
         RootReference rootReference;
         Page emptyRootPage = createEmptyLeaf();
         int attempt = 0;
@@ -421,6 +425,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                                             isPersistent() ? rootReference.root : null);
         } while (rootReference == null);
         rootReference.root.removeAllRecursive();
+        return rootReference;
     }
 
     /**
@@ -1107,6 +1112,27 @@ public class MVMap<K, V> extends AbstractMap<K, V>
             }
             RootReference updatedRootReference = rootReference.updateVersion(previous, writeVersion, ++attempt);
             if(root.compareAndSet(rootReference, updatedRootReference)) {
+                RootReference.RemovalInfoNode removalInfo = rootReference.extractRemovalInfo();
+                if (isPersistent()) {
+                    while (removalInfo != null && store.accountForRemovedPages(removalInfo, writeVersion) && this == store.getMetaMap()) {
+                        attempt = 0;
+                        while(true) {
+                            rootReference = flushAndGetRoot();
+                            if (rootReference.hasRemovalInfo()) {
+                                updatedRootReference = rootReference.updateVersion(updatedRootReference.previous, writeVersion, ++attempt);
+                                if(root.compareAndSet(rootReference, updatedRootReference)) {
+                                    removalInfo = rootReference.extractRemovalInfo();
+                                    break;
+                                }
+                            } else {
+                                removalInfo = null;
+                                updatedRootReference = rootReference;
+                                break;
+                            }
+                        }
+                    }
+                }
+
                 removeUnusedOldVersions(updatedRootReference);
                 return updatedRootReference;
             }
@@ -1271,14 +1297,11 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 }
                 p = replacePage(pos, p, unsavedMemoryHolder);
 
+                tip = isPersistent() && tip != null ? tip.filterUnsavedPages(unsavedMemoryHolder) : null;
                 RootReference updatedRootReference = rootReference.updatePageAndLockedStatus(p, remainingBuffer,
                                                                         lockedForUpdate, tip);
                 if (root.compareAndSet(rootReference, updatedRootReference)) {
                     lockedRootReference = null;
-                    while (tip != null) {
-                        tip.page.removePage();
-                        tip = tip.parent;
-                    }
                     if (isPersistent()) {
                         store.registerUnsavedPage(unsavedMemoryHolder.value);
                     }
@@ -1773,26 +1796,26 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 }
                 rootPage = replacePage(pos, p, unsavedMemoryHolder);
                 if (lockedRootReference == null) {
+                    tip = isPersistent() ? tip.filterUnsavedPages(unsavedMemoryHolder) : null;
                     if (!updateRoot(rootReference, rootPage, attempt, tip)) {
                         decisionMaker.reset();
                         continue;
                     } else {
                         notifyWaiters();
                     }
+                } else {
+                    unlockRoot(rootPage, isPersistent() ? tip : null);
+                    lockedRootReference = null;
                 }
+                if (isPersistent()) {
+                    store.registerUnsavedPage(unsavedMemoryHolder.value);
+                }
+                return result;
             } finally {
                 if(lockedRootReference != null) {
                     unlockRoot(rootPage);
                 }
             }
-            while (tip != null) {
-                tip.page.removePage();
-                tip = tip.parent;
-            }
-            if (isPersistent()) {
-                store.registerUnsavedPage(unsavedMemoryHolder.value);
-            }
-            return result;
         }
     }
 
