@@ -839,7 +839,11 @@ public class MVStore implements AutoCloseable {
                 assert c.version <= currentVersion;
                 // might be there already, due to meta traversal
                 // see readPage() ... getChunkIfFound()
-                chunks.putIfAbsent(c.id, c);
+                test = chunks.putIfAbsent(c.id, c);
+                if (test != null) {
+                    c = test;
+                }
+                assert c.version <= currentVersion;
                 long block = c.block;
                 test = validChunkCacheByLocation.get(block);
                 if (test == null) {
@@ -854,6 +858,23 @@ public class MVStore implements AutoCloseable {
                     // and registered as potential "last chunk" candidate
                     continue;
                 }
+
+                if (c.pageCountLive == 0) {
+                    // we can just remove entry from meta, referencing to this chunk,
+                    // but store maybe R/O, and it's not properly started yet,
+                    // so lets make this chunk "dead" and taking no space,
+                    // and it will be automatically removed later.
+                    c.block = Long.MAX_VALUE;
+                    c.len = Integer.MAX_VALUE;
+                    if (c.unused == 0) {
+                        c.unused = creationTime;
+                    }
+                    if (c.unusedAtVersion == 0) {
+                        c.unusedAtVersion = INITIAL_VERSION;
+                    }
+                    continue;
+                }
+
                 // chunk reference is invalid
                 // this "last chunk" candidate is not suitable
                 // but we continue to process all references
@@ -865,9 +886,11 @@ public class MVStore implements AutoCloseable {
         fileStore.clear();
         // build the free space list
         for (Chunk c : chunks.values()) {
-            long start = c.block * BLOCK_SIZE;
-            int length = c.len * BLOCK_SIZE;
-            fileStore.markUsed(start, length);
+            if (c.isSaved()) {
+                long start = c.block * BLOCK_SIZE;
+                int length = c.len * BLOCK_SIZE;
+                fileStore.markUsed(start, length);
+            }
         }
         assert validateFileLength("on open");
         setWriteVersion(currentVersion);
