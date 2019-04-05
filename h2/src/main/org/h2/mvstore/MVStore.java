@@ -869,8 +869,7 @@ public class MVStore implements AutoCloseable {
             int length = c.len * BLOCK_SIZE;
             fileStore.markUsed(start, length);
         }
-        assert fileStore.getFileLengthInUse() == measureFileLengthInUse() :
-                fileStore.getFileLengthInUse() + " != " + measureFileLengthInUse();
+        assert validateFileLength("on open");
         setWriteVersion(currentVersion);
         if (lastStoredVersion == INITIAL_VERSION) {
             lastStoredVersion = currentVersion - 1;
@@ -1022,7 +1021,7 @@ public class MVStore implements AutoCloseable {
                                     }
                                 }
                                 commit();
-
+                                assert validateFileLength("on close");
                                 shrinkFileIfPossible(0);
                             }
 
@@ -1351,8 +1350,7 @@ public class MVStore implements AutoCloseable {
         long filePos = allocateFileSpace(length, !reuseSpace);
         c.block = filePos / BLOCK_SIZE;
         c.len = length / BLOCK_SIZE;
-        assert fileStore.getFileLengthInUse() == measureFileLengthInUse() :
-                fileStore.getFileLengthInUse() + " != " + measureFileLengthInUse() + " " + c;
+        assert validateFileLength(c.asString());
         c.metaRootPos = metaRoot.getPos();
         // calculate and set the likely next position
         if (reuseSpace) {
@@ -1425,6 +1423,7 @@ public class MVStore implements AutoCloseable {
                 - currentUnsavedPageCount);
 
         lastStoredVersion = storeVersion;
+        dropUnusedChunks();
     }
 
     /**
@@ -1927,7 +1926,7 @@ public class MVStore implements AutoCloseable {
                 boolean oldReuse = reuseSpace;
                 try {
                     retentionTime = -1;
-                    freeUnusedChunks();
+                    dropUnusedChunks();
                     if (fileStore.getFillRate() <= targetFillRate) {
                         long start = fileStore.getFirstFree() / BLOCK_SIZE;
                         long maxBlocksToMove = moveSize / BLOCK_SIZE;
@@ -2588,23 +2587,23 @@ public class MVStore implements AutoCloseable {
                 loadFromFile = true;
                 for (int id : remove) {
                     Chunk c = chunks.remove(id);
-                    long start = c.block * BLOCK_SIZE;
-                    int length = c.len * BLOCK_SIZE;
-                    fileStore.free(start, length);
-                    assert fileStore.getFileLengthInUse() == measureFileLengthInUse() :
-                            fileStore.getFileLengthInUse() + " != " + measureFileLengthInUse();
-                    // overwrite the chunk,
-                    // so it is not be used later on
-                    WriteBuffer buff = getWriteBuffer();
-                    buff.limit(length);
-                    // buff.clear() does not set the data
-                    Arrays.fill(buff.getBuffer().array(), (byte) 0);
-                    write(start, buff.getBuffer());
-                    releaseWriteBuffer(buff);
-                    // only really needed if we remove many chunks, when writes are
-                    // re-ordered - but we do it always, because rollback is not
-                    // performance critical
-                    sync();
+                    if (c != null) {
+                        long start = c.block * BLOCK_SIZE;
+                        int length = c.len * BLOCK_SIZE;
+                        freeFileSpace(start, length);
+                        // overwrite the chunk,
+                        // so it is not be used later on
+                        WriteBuffer buff = getWriteBuffer();
+                        buff.limit(length);
+                        // buff.clear() does not set the data
+                        Arrays.fill(buff.getBuffer().array(), (byte) 0);
+                        write(start, buff.getBuffer());
+                        releaseWriteBuffer(buff);
+                        // only really needed if we remove many chunks, when writes are
+                        // re-ordered - but we do it always, because rollback is not
+                        // performance critical
+                        sync();
+                    }
                 }
                 lastChunk = keep;
                 writeStoreHeader();
@@ -3117,6 +3116,45 @@ public class MVStore implements AutoCloseable {
         currentTxCounter = new TxCounter(version);
         txCounter.counter.decrementAndGet();
         dropUnusedVersions();
+    }
+
+    private void dropUnusedChunks() {
+        assert storeLock.isHeldByCurrentThread();
+        long oldestVersionToKeep = getOldestVersionToKeep();
+        long time = getTimeSinceCreation();
+        // we can not remove chunks here via use of iterator here due to concurrency concerns
+        // and use remove() instead
+        for (Chunk chunk : chunks.values()) {
+            if (chunk.isSaved() && canOverwriteChunk(chunk, time, oldestVersionToKeep)) {
+                dropChunk(chunk);
+            }
+        }
+    }
+
+    private void dropChunk(Chunk chunk) {
+        if (meta.remove(Chunk.getMetaKey(chunk.id)) != null) {
+            markMetaChanged();
+        }
+        if (chunks.remove(chunk.id) != null) {
+            freeChunkSpace(chunk);
+        }
+    }
+
+    private void freeChunkSpace(Chunk chunk) {
+        long start = chunk.block * BLOCK_SIZE;
+        int length = chunk.len * BLOCK_SIZE;
+        freeFileSpace(start, length);
+    }
+
+    private void freeFileSpace(long start, int length) {
+        fileStore.free(start, length);
+        assert validateFileLength(start + ":" + length);
+    }
+
+    private boolean validateFileLength(String msg) {
+        assert fileStore.getFileLengthInUse() == measureFileLengthInUse() :
+                fileStore.getFileLengthInUse() + " != " + measureFileLengthInUse() + " " + msg;
+        return true;
     }
 
     private void dropUnusedVersions() {
