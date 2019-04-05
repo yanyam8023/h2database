@@ -185,8 +185,6 @@ public class MVStore implements AutoCloseable {
 
     private volatile boolean reuseSpace = true;
 
-    private boolean freeUnusedOnBackgroundThread = true;
-
     private volatile int state;
 
     private final FileStore fileStore;
@@ -2893,16 +2891,6 @@ public class MVStore implements AutoCloseable {
                 break;
             }
         }
-    }
-
-    /**
-     * This defaults to true. Note that setting this has no effect if
-     * auto-commit delay is set to zero.
-     *
-     * @param b true if we should free unused on background thread
-     */
-    public void setFreeUnusedOnBackgroundThread(boolean b) {
-        this.freeUnusedOnBackgroundThread = b;
     }
 
     /**
