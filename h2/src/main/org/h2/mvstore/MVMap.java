@@ -1101,7 +1101,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
      *
      * @return new page
      */
-    public Page createEmptyLeaf() {
+    protected Page createEmptyLeaf() {
         return Page.createEmptyLeaf(this);
     }
 
@@ -1280,7 +1280,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
     }
 
     private static Page replacePage(CursorPos path, Page replacement, IntValueHolder unsavedMemoryHolder) {
-        int unsavedMemory = replacement.getMemory();
+        int unsavedMemory = replacement.isSaved() ? 0 : replacement.getMemory();
         while (path != null) {
             Page parent = path.page;
             // condition below should always be true, but older versions (up to 1.4.197)
@@ -1911,7 +1911,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         }
     }
 
-    private static final class IntValueHolder {
+    static final class IntValueHolder {
         int value;
 
         IntValueHolder() {}

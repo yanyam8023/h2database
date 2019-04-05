@@ -1033,10 +1033,10 @@ public abstract class Page implements Cloneable
 
         @Override
         public String toString() {
-            return "Cnt:" + count + ", pos:" + DataUtils.getPageChunkId(pos) +
-                    "-" + DataUtils.getPageOffset(pos) + ":" + DataUtils.getPageMaxLength(pos) +
+            return "Cnt:" + count + ", pos:" + (pos == 0 ? "0" : DataUtils.getPageChunkId(pos) +
+                    "-" + DataUtils.getPageOffset(pos) + ":" + DataUtils.getPageMaxLength(pos)) +
                     ((page == null ? DataUtils.getPageType(pos) == 0 : page.isLeaf()) ? " leaf" : " node") +
-                    ", " + page;
+                    ", page:{" + page + "}";
         }
     }
 

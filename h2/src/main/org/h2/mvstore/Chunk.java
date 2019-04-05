@@ -210,7 +210,8 @@ public class Chunk {
      *
      * @return the fill rate
      */
-    public int getFillRate() {
+    int getFillRate() {
+        assert maxLenLive <= maxLen : maxLenLive + " > " + maxLen;
         if (maxLenLive <= 0) {
             return 0;
         } else if (maxLenLive == maxLen) {

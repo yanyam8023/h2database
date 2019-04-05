@@ -1723,7 +1723,7 @@ public class MVStore implements AutoCloseable {
                 return false;
             }
         }
-        return c.unusedAtVersion > 0 && oldestVersionToKeep > c.unusedAtVersion;
+        return c.unusedAtVersion != 0 && c.unusedAtVersion <= oldestVersionToKeep;
     }
 
     private long getTimeSinceCreation() {
@@ -2111,11 +2111,12 @@ public class MVStore implements AutoCloseable {
      *
      * @return the fill rate, in percent (100 is completely full)
      */
-    public int getChunksFillRate() {
+    private int getChunksFillRate() {
         long maxLengthSum = 1;
         long maxLengthLiveSum = 1;
         long time = getTimeSinceCreation();
         for (Chunk c : chunks.values()) {
+            assert c.maxLen >= 0;
             maxLengthSum += c.maxLen;
             if (c.time + retentionTime > time) {
                 // young chunks (we don't optimize those):
