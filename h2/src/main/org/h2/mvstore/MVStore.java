@@ -226,12 +226,6 @@ public class MVStore implements AutoCloseable {
     private long updateAttemptCounter = 0;
 
     /**
-     * The map of temporarily freed storage space caused by freed pages.
-     * It contains the number of freed entries per chunk.
-     */
-    private final Map<Integer, Chunk> freedPageSpace = new HashMap<>();
-
-    /**
      * The metadata map. Write access to this map needs to be done under storeLock.
      */
     private final MVMap<String, String> meta;
@@ -325,7 +319,6 @@ public class MVStore implements AutoCloseable {
 
     private long lastTimeAbsolute;
 
-    private long lastFreeUnusedChunks;
 
     /**
      * Create and open the store.
@@ -1449,8 +1442,13 @@ public class MVStore implements AutoCloseable {
     }
 
     /**
-     * Try to free unused chunks. This method doesn't directly write, but can
-     * change the metadata, and therefore cause a background write.
+     * Try to free unreachable chunks.
+     * This method doesn't directly write, only metadata is updated, but
+     * completely free chunks are not removed from the set of chunks,
+     * and the disk space is not yet marked as free.
+     *
+     * This method (and a sizable chunk of related code) is not used anymore.
+     * For now it can be used manually as a maintance procedure.
      */
     private void freeUnusedChunks() {
         assert storeLock.isHeldByCurrentThread();
@@ -2531,9 +2529,6 @@ public class MVStore implements AutoCloseable {
                 }
                 maps.clear();
                 lastChunk = null;
-                synchronized (freedPageSpace) {
-                    freedPageSpace.clear();
-                }
                 versions.clear();
                 currentVersion = version;
                 setWriteVersion(version);
