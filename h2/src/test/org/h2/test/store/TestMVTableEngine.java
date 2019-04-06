@@ -1137,15 +1137,12 @@ public class TestMVTableEngine extends TestDb {
     private void testReuseDiskSpace() throws Exception {
         deleteDb(getTestName());
         // set WRITE_DELAY=0 so the free-unused-space runs on commit
-        String dbName = getTestName() + ";MV_STORE=TRUE;WRITE_DELAY=0";
+        String dbName = getTestName() + ";MV_STORE=TRUE;WRITE_DELAY=0;RETENTION_TIME=0";
         Connection conn;
         Statement stat;
         long maxSize = 0;
         for (int i = 0; i < 20; i++) {
             conn = getConnection(dbName);
-            Database db = (Database) ((JdbcConnection) conn).
-                    getSession().getDataHandler();
-            db.getStore().getMvStore().setRetentionTime(0);
             stat = conn.createStatement();
             stat.execute("create table test(id int primary key, data varchar)");
             stat.execute("insert into test select x, space(1000) " +
@@ -1154,8 +1151,9 @@ public class TestMVTableEngine extends TestDb {
             conn.close();
             long size = FileUtils.size(getBaseDir() + "/" + getTestName()
                     + Constants.SUFFIX_MV_FILE);
+            trace("Pass #" + i + ": size=" + size);
             if (i < 10) {
-                maxSize = (int) (Math.max(size, maxSize) * 1.1);
+                maxSize = (int) (Math.max(size * 1.1, maxSize));
             } else if (size > maxSize) {
                 fail(i + " size: " + size + " max: " + maxSize);
             }

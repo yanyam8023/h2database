@@ -990,8 +990,13 @@ public class TestMVStore extends TestBase {
             int bad = (old + 1) & 15;
             buff.put(idx + "fletcher:".length(),
                     (byte) Character.forDigit(bad, 16));
-            buff.rewind();
-            fc.write(buff, i);
+
+            // now intentionally corrupt first or both headers
+            // note that headers may be overwritten upon successfull opening
+            for (int b = 0; b <= i; b += blockSize) {
+                buff.rewind();
+                fc.write(buff, b);
+            }
             fc.close();
 
             if (i == 0) {
@@ -1441,7 +1446,7 @@ public class TestMVStore extends TestBase {
         }
         assertEquals(1000, m.size());
         // memory calculations were adjusted, so as this out-of-the-thin-air number
-        assertEquals(93522, s.getUnsavedMemory());
+        assertEquals(93409, s.getUnsavedMemory());
         s.commit();
         assertEquals(2, s.getFileStore().getWriteCount());
         s.close();
