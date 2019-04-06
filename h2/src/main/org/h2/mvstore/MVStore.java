@@ -2035,10 +2035,7 @@ public class MVStore implements AutoCloseable {
                         Iterable<Chunk> old = findOldChunks(targetFillRate, write);
                         if (old != null) {
                             HashSet<Integer> idSet = createIdSet(old);
-                            if (!idSet.isEmpty()) {
-                                compactRewrite(idSet);
-                                return true;
-                            }
+                            return !idSet.isEmpty() && compactRewrite(idSet) > 0;
                         }
                     } finally {
                         storeLock.unlock();
@@ -2059,7 +2056,7 @@ public class MVStore implements AutoCloseable {
      *
      * @return the fill rate, in percent (100 is completely full)
      */
-    private int getChunksFillRate() {
+    public int getChunksFillRate() {
         long maxLengthSum = 1;
         long maxLengthLiveSum = 1;
         long time = getTimeSinceCreation();
