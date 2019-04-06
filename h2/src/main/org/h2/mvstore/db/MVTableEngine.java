@@ -355,16 +355,7 @@ public class MVTableEngine implements TableEngine {
          * @param maxCompactTime the maximum time in milliseconds to compact
          */
         public void compactFile(long maxCompactTime) {
-            mvStore.setRetentionTime(0);
-            long start = System.nanoTime();
-            while (mvStore.compact(95, 16 * 1024 * 1024)) {
-                mvStore.sync();
-                mvStore.compactMoveChunks(95, 16 * 1024 * 1024);
-                long time = System.nanoTime() - start;
-                if (time > TimeUnit.MILLISECONDS.toNanos(maxCompactTime)) {
-                    break;
-                }
-            }
+            mvStore.compactFile(maxCompactTime);
         }
 
         /**

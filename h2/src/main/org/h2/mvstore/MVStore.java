@@ -2004,6 +2004,27 @@ public class MVStore implements AutoCloseable {
     }
 
     /**
+     * Compact store file, that is, compact blocks that have a low
+     * fill rate, and move chunks next to each other. This will typically
+     * shrink the file. Changes are flushed to the file, and old
+     * chunks are overwritten.
+     *
+     * @param maxCompactTime the maximum time in milliseconds to compact
+     */
+    public void compactFile(long maxCompactTime) {
+        setRetentionTime(0);
+        long start = System.nanoTime();
+        while (compact(95, 16 * 1024 * 1024)) {
+            sync();
+            compactMoveChunks(95, 16 * 1024 * 1024);
+            long time = System.nanoTime() - start;
+            if (time > TimeUnit.MILLISECONDS.toNanos(maxCompactTime)) {
+                break;
+            }
+        }
+    }
+
+    /**
      * Try to increase the fill rate by re-writing partially full chunks. Chunks
      * with a low number of live items are re-written.
      * <p>
