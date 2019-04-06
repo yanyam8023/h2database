@@ -593,8 +593,8 @@ public class MVMap<K, V> extends AbstractMap<K, V>
      *
      * @param set the set of chunk ids
      */
-    final void rewrite(Set<Integer> set) {
-        rewrite(getRootPage(), set);
+    final int rewrite(Set<Integer> set) {
+        return rewrite(getRootPage(), set);
     }
 
     private int rewrite(Page p, Set<Integer> set) {

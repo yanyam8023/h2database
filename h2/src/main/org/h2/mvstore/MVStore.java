@@ -782,7 +782,7 @@ public class MVStore implements AutoCloseable {
 
         long blocksInStore = fileStore.size() / BLOCK_SIZE;
         // this queue will hold potential candidates for lastChunk to fall back to
-        Queue<Chunk> lastChunkCandidates = new PriorityQueue<>(Math.max(32, (int)(blocksInStore / 4)),
+        Queue<Chunk> lastChunkCandidates = new PriorityQueue<>(Math.max(32, (int)(blocksInStore / 4) + 1),
                 new Comparator<Chunk>() {
             @Override
             public int compare(Chunk one, Chunk two) {
@@ -2135,22 +2135,24 @@ public class MVStore implements AutoCloseable {
         return queue;
     }
 
-    private void compactRewrite(Set<Integer> set) {
+    private int compactRewrite(Set<Integer> set) {
         // this will ensure better recognition of the last chunk
         // in case of pwer failure, since we are going to move older chunks
         // to the end of the file
         writeStoreHeader();
         sync();
 
+        int rewritedPageCount = 0;
         for (MVMap<?, ?> m : maps.values()) {
             @SuppressWarnings("unchecked")
             MVMap<Object, Object> map = (MVMap<Object, Object>) m;
             if (!map.isClosed()) {
-                map.rewrite(set);
+                rewritedPageCount += map.rewrite(set);
             }
         }
-        meta.rewrite(set);
+        rewritedPageCount += meta.rewrite(set);
         store();
+        return rewritedPageCount;
     }
 
     private HashSet<Integer> createIdSet(Iterable<Chunk> toCompact) {
