@@ -172,10 +172,8 @@ public class FreeSpaceBitSet {
      */
     public int getFillRate() {
         int cardinality = set.cardinality();
-        if (cardinality == 0) {
-            return 0;
-        }
-        return Math.max(1, (int)(100L * cardinality / set.length()));
+        int length = set.length();
+        return (int)((100L * cardinality + length - 1) / length);
     }
 
     /**
