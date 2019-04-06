@@ -2379,7 +2379,7 @@ public class MVStore implements AutoCloseable {
             return v;
         }
 
-        long storeVersion = currentStoreVersion;
+        long storeVersion = lastStoredVersion;
         if (storeVersion != INITIAL_VERSION && storeVersion < v) {
             v = storeVersion;
         }
