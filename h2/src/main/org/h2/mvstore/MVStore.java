@@ -2202,59 +2202,34 @@ public class MVStore implements AutoCloseable {
         return p;
     }
 
-    /**
-     * Remove a page.
-     *
-     * @param pos the position of the page
-     * @param memory the memory usage
-     */
-    void removePage(long pos, int memory) {
-        // we need to keep temporary pages,
-        // to support reading old versions and rollback
-        if (!DataUtils.isPageSaved(pos)) {
-            // the page was not yet stored:
-            // just using "unsavedMemory -= memory" could result in negative
-            // values, because in some cases a page is allocated, but never
-            // stored, so we need to use max
-            unsavedMemory = Math.max(0, unsavedMemory - memory);
-        }
-    }
-
     boolean accountForRemovedPages(RootReference.RemovalInfoNode removalInfo, final long version) {
         final Set<Chunk> modified = new HashSet<>();
-        RootReference.PageVisitor visitor = new RootReference.PageVisitor() {
-            long time;
-            @Override
-            public void visit(long pagePos) {
+        while (removalInfo != null) {
+            long time = 0;
+            for (long pagePos : removalInfo.data) {
                 assert DataUtils.isPageSaved(pagePos);
-                if (DataUtils.isPageSaved(pagePos)) {
-                    int chunkId = DataUtils.getPageChunkId(pagePos);
-                    int pageLength = DataUtils.getPageMaxLength(pagePos);
+                int chunkId = DataUtils.getPageChunkId(pagePos);
+                int pageLength = DataUtils.getPageMaxLength(pagePos);
 
-                    Chunk chunk = chunks.get(chunkId);
-                    chunk.maxLenLive -= pageLength;
-                    chunk.pageCountLive -= 1;
+                Chunk chunk = chunks.get(chunkId);
+                chunk.maxLenLive -= pageLength;
+                chunk.pageCountLive -= 1;
 
-                    assert chunk.pageCountLive >= 0 : chunk;
-                    assert chunk.maxLenLive >= 0 : chunk;
-                    assert (chunk.pageCountLive == 0) == (chunk.maxLenLive == 0) : chunk;
+                assert chunk.pageCountLive >= 0 : chunk;
+                assert chunk.maxLenLive >= 0 : chunk;
+                assert (chunk.pageCountLive == 0) == (chunk.maxLenLive == 0) : chunk;
 
-                    if (chunk.pageCountLive == 0 && chunk.maxLenLive == 0) {
-                        chunk.unusedAtVersion = version;
-                        if (time == 0) {
-                            time = getTimeSinceCreation();
-                        }
-                        chunk.unused = time;
+                if (chunk.pageCountLive == 0 && chunk.maxLenLive == 0) {
+                    chunk.unusedAtVersion = version;
+                    if (time == 0) {
+                        time = getTimeSinceCreation();
                     }
-                    if (chunk.isSaved()) {
-                        modified.add(chunk);
-                    }
+                    chunk.unused = time;
+                }
+                if (chunk.isSaved()) {
+                    modified.add(chunk);
                 }
             }
-        };
-
-        while (removalInfo != null) {
-            removalInfo.data.visitPages(visitor);
             removalInfo = removalInfo.getNext();
         }
         if (!modified.isEmpty()) {

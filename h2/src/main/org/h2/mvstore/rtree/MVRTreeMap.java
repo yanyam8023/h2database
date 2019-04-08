@@ -142,10 +142,12 @@ public final class MVRTreeMap<V> extends MVMap<SpatialKey, V> {
             if (removedPages != null) {
                 removedPages.add(p);
             }
-            p = p.copy(true);
+            p = p.copy();
             V result = operate(p, key, value, decisionMaker, removedPages);
             if (!p.isLeaf() && p.getTotalCount() == 0) {
-                p.removePage();
+                if (removedPages != null) {
+                    removedPages.add(p);
+                }
                 p = createEmptyLeaf();
             } else if (p.getKeyCount() > store.getKeysPerPage() || p.getMemory() > store.getMaxPageSize()
                                                                 && p.getKeyCount() > 3) {
@@ -166,20 +168,33 @@ public final class MVRTreeMap<V> extends MVMap<SpatialKey, V> {
                     store.registerUnsavedPage(p.getMemory());
                 }
             }
-            RootReference.VisitablePages pagesToBeRemoved = removedPages == null ? null :
-                    new RootReference.VisitablePages() {
-                        @Override
-                        public void visitPages(RootReference.PageVisitor visitor) {
-                            for (Page page : removedPages) {
-                                long pagePos = page.getPos();
-                                if (DataUtils.isPageSaved(pagePos)) {
-                                    visitor.visit(pagePos);
-                                }
-                            }
-                        }
-                    };
 
-            if(updateRoot(rootReference, p, attempt, pagesToBeRemoved)) {
+            long[] removedPositions = null;
+            int unsavedMemory = 0;
+            if (removedPages != null) {
+                int count = 0;
+                for (Page page : removedPages) {
+                    if (page.isSaved()) {
+                        ++count;
+                    } else {
+                        unsavedMemory -= page.getMemory();
+                    }
+                }
+                if (count != 0) {
+                    removedPositions = new long[count];
+                    count = 0;
+                    for (Page page : removedPages) {
+                        if (page.isSaved()) {
+                            removedPositions[count++] = page.getPos();
+                        }
+                    }
+                }
+            }
+
+            if(updateRoot(rootReference, p, attempt, removedPositions)) {
+                if (isPersistent()) {
+                    store.registerUnsavedPage(unsavedMemory);
+                }
                 return result;
             }
             decisionMaker.reset();
@@ -236,7 +251,7 @@ public final class MVRTreeMap<V> extends MVMap<SpatialKey, V> {
                     if (removedPages != null) {
                         removedPages.add(cOld);
                     }
-                    Page c = cOld.copy(true);
+                    Page c = cOld.copy();
                     long oldSize = c.getTotalCount();
                     result = operate(c, key, value, decisionMaker, removedPages);
                     p.setChild(i, c);
@@ -247,8 +262,8 @@ public final class MVRTreeMap<V> extends MVMap<SpatialKey, V> {
                     if (c.getTotalCount() == 0) {
                         // this child was deleted
                         p.remove(i);
-                        if (p.getKeyCount() == 0) {
-                            c.removePage();
+                        if (removedPages != null) {
+                            removedPages.add(p);
                         }
                         break;
                     }
@@ -289,7 +304,7 @@ public final class MVRTreeMap<V> extends MVMap<SpatialKey, V> {
             if (removedPages != null) {
                 removedPages.add(c);
             }
-            c = c.copy(true);
+            c = c.copy();
             if (c.getKeyCount() > store.getKeysPerPage() || c.getMemory() > store.getMaxPageSize()
                     && c.getKeyCount() > 4) {
                 // split on the way down

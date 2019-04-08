@@ -418,13 +418,40 @@ public class MVMap<K, V> extends AbstractMap<K, V>
     RootReference clearIt() {
         RootReference rootReference;
         Page emptyRootPage = createEmptyLeaf();
+        int unsavedMemory = 0;
         int attempt = 0;
         do {
             rootReference = getRoot();
-            rootReference = getUpdatedRoot(rootReference, emptyRootPage, ++attempt,
-                                            isPersistent() ? rootReference.root : null);
+            long[] removedPositions = null;
+            if (isPersistent()) {
+                unsavedMemory = 0;
+                SavedPagesCounter counter = new SavedPagesCounter();
+                Page page = rootReference.root;
+                page.visitPages(counter);
+                unsavedMemory -= counter.getUnsavedMemory();
+                int count = counter.getCount();
+                if (count > 0) {
+                    final long[] positions = new long[count];
+                    Page.Visitor visitor = new Page.Visitor() {
+                        private int indx;
+
+                        @Override
+                        public void visit(Page page, long pagePos) {
+                            if (DataUtils.isPageSaved(pagePos)) {
+                                positions[indx++] = pagePos;
+                            }
+                        }
+                    };
+                    page.visitPages(visitor);
+                    removedPositions = positions;
+                }
+            }
+            rootReference = getUpdatedRoot(rootReference, emptyRootPage, ++attempt, removedPositions);
         } while (rootReference == null);
-        rootReference.root.removeAllRecursive();
+
+        if (isPersistent()) {
+            store.registerUnsavedPage(unsavedMemory);
+        }
         return rootReference;
     }
 
@@ -836,17 +863,17 @@ public class MVMap<K, V> extends AbstractMap<K, V>
      * @return new RootReference or null if update failed
      */
     protected final boolean updateRoot(RootReference expectedRootReference, Page newRootPage,
-                                       int attemptUpdateCounter, RootReference.VisitablePages removedPages)
+                                       int attemptUpdateCounter, long[] removedPositions)
     {
-        return getUpdatedRoot(expectedRootReference, newRootPage, attemptUpdateCounter, removedPages) != null;
+        return getUpdatedRoot(expectedRootReference, newRootPage, attemptUpdateCounter, removedPositions) != null;
     }
 
     private RootReference getUpdatedRoot(RootReference expectedRootReference, Page newRootPage,
-                                       int attemptUpdateCounter, RootReference.VisitablePages removedPages)
+                                       int attemptUpdateCounter, long[] removedPositions)
     {
         RootReference currentRoot = flushAndGetRoot();
         if (currentRoot == expectedRootReference && !currentRoot.lockedForUpdate) {
-            RootReference updatedRoot = currentRoot.updateRootPage(newRootPage, attemptUpdateCounter, removedPages);
+            RootReference updatedRoot = currentRoot.updateRootPage(newRootPage, attemptUpdateCounter, removedPositions);
             if (root.compareAndSet(currentRoot, updatedRoot)) {
                 return updatedRoot;
             }
@@ -957,16 +984,6 @@ public class MVMap<K, V> extends AbstractMap<K, V>
 
     public final long getCreateVersion() {
         return createVersion;
-    }
-
-    /**
-     * Remove the given page (make the space available).
-     *
-     * @param pos the position of the page to remove
-     * @param memory the number of bytes used for this page
-     */
-    protected final void removePage(long pos, int memory) {
-        store.removePage(pos, memory);
     }
 
     /**
@@ -1190,7 +1207,9 @@ public class MVMap<K, V> extends AbstractMap<K, V>
             }
             target.setComplete();
         }
-        store.registerUnsavedPage(target.getMemory());
+        if (isPersistent()) {
+            store.registerUnsavedPage(target.getMemory());
+        }
         if (store.isSaveNeeded()) {
             store.commit();
         }
@@ -1297,9 +1316,11 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 }
                 p = replacePage(pos, p, unsavedMemoryHolder);
 
-                tip = isPersistent() && tip != null ? tip.filterUnsavedPages(unsavedMemoryHolder) : null;
+                long[] removedPositions = isPersistent() && tip != null ?
+                                    tip.collectRemovedPagePositions(unsavedMemoryHolder) :
+                                    null;
                 RootReference updatedRootReference = rootReference.updatePageAndLockedStatus(p, remainingBuffer,
-                                                                        lockedForUpdate, tip);
+                                                                        lockedForUpdate, removedPositions);
                 if (root.compareAndSet(rootReference, updatedRootReference)) {
                     lockedRootReference = null;
                     if (isPersistent()) {
@@ -1795,16 +1816,16 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                     }
                 }
                 rootPage = replacePage(pos, p, unsavedMemoryHolder);
+                long[] removedPositions = isPersistent() ? tip.collectRemovedPagePositions(unsavedMemoryHolder) : null;
                 if (lockedRootReference == null) {
-                    tip = isPersistent() ? tip.filterUnsavedPages(unsavedMemoryHolder) : null;
-                    if (!updateRoot(rootReference, rootPage, attempt, tip)) {
+                    if (!updateRoot(rootReference, rootPage, attempt, removedPositions)) {
                         decisionMaker.reset();
                         continue;
                     } else {
                         notifyWaiters();
                     }
                 } else {
-                    unlockRoot(rootPage, isPersistent() ? tip : null);
+                    unlockRoot(rootPage, removedPositions);
                     lockedRootReference = null;
                 }
                 if (isPersistent()) {
@@ -1879,15 +1900,15 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         return unlockRoot(newRootPage, -1, null);
     }
 
-    private RootReference unlockRoot(Page newRootPage, RootReference.VisitablePages removedPages) {
-        return unlockRoot(newRootPage, -1, removedPages);
+    private RootReference unlockRoot(Page newRootPage, long[] removedPositions) {
+        return unlockRoot(newRootPage, -1, removedPositions);
     }
 
     private RootReference unlockRoot(Page newRootPage, int appendCounter) {
         return unlockRoot(newRootPage, appendCounter, null);
     }
 
-    private RootReference unlockRoot(Page newRootPage, int appendCounter, RootReference.VisitablePages removedPages) {
+    private RootReference unlockRoot(Page newRootPage, int appendCounter, long[] removedPositions) {
         RootReference updatedRootReference;
         boolean success;
         do {
@@ -1896,7 +1917,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
             updatedRootReference = rootReference.updatePageAndLockedStatus(
                                         newRootPage == null ? rootReference.root : newRootPage,
                                         appendCounter == -1 ? rootReference.getAppendCounter() : appendCounter,
-                                        false, removedPages);
+                                        false, removedPositions);
             success = root.compareAndSet(rootReference, updatedRootReference);
         } while(!success);
 
@@ -1963,5 +1984,27 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         int value;
 
         IntValueHolder() {}
+    }
+
+    private static class SavedPagesCounter implements Page.Visitor {
+        private int count;
+        private int unsavedMemory;
+
+        @Override
+        public void visit(Page page, long pagePos) {
+            if (DataUtils.isPageSaved(pagePos)) {
+                ++count;
+            } else {
+                unsavedMemory += page.getMemory();
+            }
+        }
+
+        public int getCount() {
+            return count;
+        }
+
+        public int getUnsavedMemory() {
+            return unsavedMemory;
+        }
     }
 }

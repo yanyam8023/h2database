@@ -11,7 +11,7 @@ package org.h2.mvstore;
  * fom a specific (target) key within a leaf node all the way up to te root
  * (bottom up path).
  */
-public class CursorPos implements RootReference.VisitablePages
+public class CursorPos
 {
     /**
      * The page at the current level.
@@ -37,37 +37,30 @@ public class CursorPos implements RootReference.VisitablePages
         this.parent = parent;
     }
 
-    CursorPos filterUnsavedPages(MVMap.IntValueHolder unsavedMemoryHolder) {
-        CursorPos head = this;
-        while (head != null && !head.page.isSaved()) {
-            unsavedMemoryHolder.value -= head.page.getMemory();
-            head = head.parent;
-        }
-        if (head != null) {
-            CursorPos tail = head;
-            CursorPos next;
-            while ((next = tail.parent) != null) {
-                if (!next.page.isSaved()) {
-                    tail.parent = next.parent;
-                    unsavedMemoryHolder.value -= next.page.getMemory();
-                } else {
-                    tail = next;
-                }
+    long[] collectRemovedPagePositions(MVMap.IntValueHolder unsavedMemoryHolder) {
+        int count = 0;
+        int unsavedMemory = 0;
+        for (CursorPos head = this; head != null; head = head.parent) {
+            Page page = head.page;
+            if (page.isSaved()) {
+                ++count;
+            } else {
+                unsavedMemory += page.getMemory();
             }
         }
-        return head;
-    }
-
-    @Override
-    public void visitPages(RootReference.PageVisitor visitor) {
-        CursorPos cursorPos = this;
-        do {
-            long pagePos = cursorPos.page.getPos();
+        unsavedMemoryHolder.value -= unsavedMemory;
+        if (count == 0) {
+            return null;
+        }
+        long[] positions = new long[count];
+        count = 0;
+        for (CursorPos head = this; head != null; head = head.parent) {
+            long pagePos = head.page.getPos();
             if (DataUtils.isPageSaved(pagePos)) {
-                visitor.visit(pagePos);
+                positions[count++] = pagePos;
             }
-            cursorPos = cursorPos.parent;
-        } while (cursorPos != null);
+        }
+        return positions;
     }
 }
 

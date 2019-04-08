@@ -39,7 +39,7 @@ import org.h2.util.Utils;
  * leaf: values (one for each key)
  * node: children (1 more than keys)
  */
-public abstract class Page implements Cloneable, RootReference.VisitablePages
+public abstract class Page implements Cloneable
 {
     /**
      * Map this page belongs to
@@ -70,14 +70,6 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
      * The keys.
      */
     private Object[] keys;
-
-    /**
-     * Whether the page is an in-memory (not stored, or not yet stored) page,
-     * and it is removed. This is to keep track of pages that concurrently
-     * changed while they are being stored, in which case the live bookkeeping
-     * needs to be aware of such cases.
-     */
-    private volatile boolean removedInMemory;
 
     /**
      * The estimated number of bytes used per child entry.
@@ -422,26 +414,8 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
      * @return a mutable copy of this page
      */
     public final Page copy() {
-        return copy(false);
-    }
-
-    /**
-     * Create a copy of this page.
-     *
-     * @param countRemoval When {@code true} the current page is removed,
-     *                     when {@code false} just copy the page.
-     * @return a mutable copy of this page
-     */
-    public final Page copy(boolean countRemoval) {
         Page newPage = clone();
         newPage.pos = 0;
-        // mark the old as deleted
-        if(countRemoval) {
-            removePage();
-            if(isPersistent()) {
-                map.store.registerUnsavedPage(newPage.getMemory());
-            }
-        }
         return newPage;
     }
 
@@ -781,12 +755,6 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
         chunk.maxLenLive += max;
         chunk.pageCount++;
         chunk.pageCountLive++;
-        if (removedInMemory) {
-            // if the page was removed _before_ the position was assigned, we
-            // need to mark it removed here, so the fields are updated
-            // when the next chunk is stored
-            map.removePage(pos, memory);
-        }
         diskSpaceUsed = max != DataUtils.PAGE_LARGE ? max : pageLength;
         return typePos + 1;
     }
@@ -908,19 +876,6 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
     public void setComplete() {}
 
     /**
-     * Remove the page.
-     */
-    public final void removePage() {
-        if(isPersistent()) {
-            long p = pos;
-            if (p == 0) {
-                removedInMemory = true;
-            }
-            map.removePage(p, memory);
-        }
-    }
-
-    /**
      * Update given CursorPos chain to correspond to "append point" in a B-tree rooted at this Page.
      *
      * @param cursorPos to update, presumably pointing to this Page
@@ -931,13 +886,10 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
     /**
      * Remove all page data recursively.
      */
-    public abstract void removeAllRecursive();
+//    public abstract void removeAllRecursive();
 
-    @Override
-    public void visitPages(RootReference.PageVisitor visitor) {
-        if (isSaved()) {
-            visitor.visit(pos);
-        }
+    public void visitPages(Visitor visitor) {
+        visitor.visit(this, pos);
     }
 
     /**
@@ -960,6 +912,10 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
     final Object[] createValueStorage(int size)
     {
         return new Object[size];
+    }
+
+    public interface Visitor {
+        void visit(Page page, long pagePos);
     }
 
     /**
@@ -1221,29 +1177,6 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
         }
 
         @Override
-        public void removeAllRecursive() {
-            if (isPersistent()) {
-                for (int i = 0, size = map.getChildPageCount(this); i < size; i++) {
-                    PageReference ref = children[i];
-                    Page page = ref.getPage();
-                    if (page != null) {
-                        page.removeAllRecursive();
-                    } else {
-                        long c = ref.getPos();
-                        int type = DataUtils.getPageType(c);
-                        if (type == PAGE_TYPE_LEAF) {
-                            int mem = DataUtils.getPageMaxLength(c);
-                            map.removePage(c, mem);
-                        } else {
-                            map.readPage(c).removeAllRecursive();
-                        }
-                    }
-                }
-            }
-            removePage();
-        }
-
-        @Override
         public CursorPos getAppendCursorPos(CursorPos cursorPos) {
             int keyCount = getKeyCount();
             Page childPage = getChildPage(keyCount);
@@ -1329,17 +1262,20 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
         }
 
         @Override
-        public void visitPages(RootReference.PageVisitor visitor) {
+        public void visitPages(Visitor visitor) {
             super.visitPages(visitor);
-            int len = getRawChildPageCount();
+            int len = map.getChildPageCount(this);
             for (int i = 0; i < len; i++) {
-                long pagePos = getChildPagePos(i);
-                if (DataUtils.isPageSaved(pagePos)) {
-                    if (DataUtils.isLeafPosition(pagePos)) {
-                        visitor.visit(pagePos);
-                    } else {
-                        getChildPage(i).visitPages(visitor);
+                PageReference ref = children[i];
+                long pagePos = ref.getPos();
+                Page page = ref.getPage();
+                if (DataUtils.isLeafPosition(pagePos)) {
+                    visitor.visit(page, pagePos);
+                } else {
+                    if (page == null) {
+                        page = getChildPage(i);
                     }
+                    page.visitPages(visitor);
                 }
             }
         }
@@ -1555,11 +1491,6 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
                 DataUtils.copyExcept(values, newValues, keyCount, index);
                 values = newValues;
             }
-        }
-
-        @Override
-        public void removeAllRecursive() {
-            removePage();
         }
 
         @Override

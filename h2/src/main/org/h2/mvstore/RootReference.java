@@ -62,7 +62,7 @@ public final class RootReference
         this.removalInfo = null;
     }
 
-    private RootReference(RootReference r, Page root, long updateAttemptCounter, VisitablePages removedPages) {
+    private RootReference(RootReference r, Page root, long updateAttemptCounter, long[] removedPositions) {
         this.root = root;
         this.version = r.version;
         this.previous = r.previous;
@@ -70,8 +70,8 @@ public final class RootReference
         this.updateAttemptCounter = r.updateAttemptCounter + updateAttemptCounter;
         this.lockedForUpdate = false;
         this.appendCounter = r.appendCounter;
-        this.removalInfo = removedPages == null ? r.removalInfo :
-                                                    new RemovalInfoNode(removedPages, r.removalInfo);
+        this.removalInfo = removedPositions == null ? r.removalInfo :
+                                                    new RemovalInfoNode(removedPositions, r.removalInfo);
     }
 
     // This one is used for locking
@@ -88,7 +88,7 @@ public final class RootReference
 
     // This one is used for unlocking
     private RootReference(RootReference r, Page root, int appendCounter, boolean lockedForUpdate,
-                  VisitablePages removedPages) {
+                  long[] removedPositions) {
         this.root = root;
         this.version = r.version;
         this.previous = r.previous;
@@ -96,8 +96,8 @@ public final class RootReference
         this.updateAttemptCounter = r.updateAttemptCounter;
         this.lockedForUpdate = lockedForUpdate;
         this.appendCounter = (byte) appendCounter;
-        this.removalInfo = removedPages == null ? r.removalInfo :
-                                                    new RemovalInfoNode(removedPages, r.removalInfo);
+        this.removalInfo = removedPositions == null ? r.removalInfo :
+                                                    new RemovalInfoNode(removedPositions, r.removalInfo);
     }
 
     // This one is used for version change
@@ -113,8 +113,8 @@ public final class RootReference
     }
 
 
-    RootReference updateRootPage(Page page, long attemptCounter, VisitablePages removedPages) {
-        return new RootReference(this, page, attemptCounter, removedPages);
+    RootReference updateRootPage(Page page, long attemptCounter, long[] removedPositions) {
+        return new RootReference(this, page, attemptCounter, removedPositions);
     }
 
     RootReference markLocked(int attemptCounter) {
@@ -125,8 +125,8 @@ public final class RootReference
         return new RootReference(this, previous, version, attempt);
     }
 
-    RootReference updatePageAndLockedStatus(Page page, int appendCounter, boolean lockedForUpdate, VisitablePages removedPages) {
-        return new RootReference(this, page, appendCounter, lockedForUpdate, removedPages);
+    RootReference updatePageAndLockedStatus(Page page, int appendCounter, boolean lockedForUpdate, long[] removedPositions) {
+        return new RootReference(this, page, appendCounter, lockedForUpdate, removedPositions);
     }
 
 
@@ -154,14 +154,6 @@ public final class RootReference
     }
 
 
-    public interface PageVisitor {
-        void visit(long pagePos);
-    }
-
-    public  interface VisitablePages {
-        void visitPages(PageVisitor visitor);
-    }
-
     static class ListNode<T>
     {
         public final T data;
@@ -177,10 +169,10 @@ public final class RootReference
         }
     }
 
-    static class RemovalInfoNode extends ListNode<RootReference.VisitablePages>
+    static class RemovalInfoNode extends ListNode<long[]>
     {
 
-        public RemovalInfoNode(VisitablePages data, ListNode<VisitablePages> next) {
+        public RemovalInfoNode(long[] data, ListNode<long[]> next) {
             super(data, next);
         }
 
