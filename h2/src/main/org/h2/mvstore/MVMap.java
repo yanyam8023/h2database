@@ -425,8 +425,9 @@ public class MVMap<K, V> extends AbstractMap<K, V>
             long[] removedPositions = null;
             if (isPersistent()) {
                 unsavedMemory = 0;
-                SavedPagesCounter counter = new SavedPagesCounter();
                 Page page = rootReference.root;
+                final long version = rootReference.version;
+                SavedPagesCounter counter = new SavedPagesCounter(version);
                 page.visitPages(counter);
                 unsavedMemory -= counter.getUnsavedMemory();
                 int count = counter.getCount();
@@ -437,12 +438,17 @@ public class MVMap<K, V> extends AbstractMap<K, V>
 
                         @Override
                         public void visit(Page page, long pagePos) {
-                            if (DataUtils.isPageSaved(pagePos)) {
+                            if (DataUtils.isPageSaved(pagePos) && DataUtils.getPageChunkId(pagePos) <= version) {
                                 positions[indx++] = pagePos;
                             }
                         }
                     };
-                    page.visitPages(visitor);
+                    try {
+                        page.visitPages(visitor);
+                    } catch(ArrayIndexOutOfBoundsException ignore) {
+                        rootReference = null;
+                        continue;
+                    }
                     removedPositions = positions;
                 }
             }
@@ -1316,9 +1322,15 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 }
                 p = replacePage(pos, p, unsavedMemoryHolder);
 
-                long[] removedPositions = isPersistent() && tip != null ?
-                                    tip.collectRemovedPagePositions(unsavedMemoryHolder) :
-                                    null;
+                long[] removedPositions = null;
+                if (isPersistent() && tip != null) {
+                    try {
+                        removedPositions = tip.collectRemovedPagePositions(unsavedMemoryHolder, rootReference.version);
+                    } catch(ArrayIndexOutOfBoundsException ignore) {
+                        rootReference = getRoot();
+                        continue;
+                    }
+                }
                 RootReference updatedRootReference = rootReference.updatePageAndLockedStatus(p, remainingBuffer,
                                                                         lockedForUpdate, removedPositions);
                 if (root.compareAndSet(rootReference, updatedRootReference)) {
@@ -1816,7 +1828,15 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                     }
                 }
                 rootPage = replacePage(pos, p, unsavedMemoryHolder);
-                long[] removedPositions = isPersistent() ? tip.collectRemovedPagePositions(unsavedMemoryHolder) : null;
+                long[] removedPositions = null;
+                if (isPersistent()) {
+                    try {
+                        removedPositions = tip.collectRemovedPagePositions(unsavedMemoryHolder, rootReference.version);
+                    } catch(ArrayIndexOutOfBoundsException ignore) {
+                        decisionMaker.reset();
+                        continue;
+                    }
+                }
                 if (lockedRootReference == null) {
                     if (!updateRoot(rootReference, rootPage, attempt, removedPositions)) {
                         decisionMaker.reset();
@@ -1987,13 +2007,20 @@ public class MVMap<K, V> extends AbstractMap<K, V>
     }
 
     private static class SavedPagesCounter implements Page.Visitor {
+        private final long version;
         private int count;
         private int unsavedMemory;
+
+        SavedPagesCounter(long version) {
+            this.version = version;
+        }
 
         @Override
         public void visit(Page page, long pagePos) {
             if (DataUtils.isPageSaved(pagePos)) {
-                ++count;
+                if (DataUtils.getPageChunkId(pagePos) <= version) {
+                    ++count;
+                }
             } else {
                 unsavedMemory += page.getMemory();
             }

@@ -139,6 +139,7 @@ public final class MVRTreeMap<V> extends MVMap<SpatialKey, V> {
             ++attempt;
             RootReference rootReference = flushAndGetRoot();
             Page p = rootReference.root;
+            long version = rootReference.version;
             if (removedPages != null) {
                 removedPages.add(p);
             }
@@ -174,8 +175,11 @@ public final class MVRTreeMap<V> extends MVMap<SpatialKey, V> {
             if (removedPages != null) {
                 int count = 0;
                 for (Page page : removedPages) {
-                    if (page.isSaved()) {
-                        ++count;
+                    long pagePos = page.getPos();
+                    if (DataUtils.isPageSaved(pagePos)) {
+                        if (DataUtils.getPageChunkId(pagePos) <= version) {
+                            ++count;
+                        }
                     } else {
                         unsavedMemory -= page.getMemory();
                     }
@@ -184,8 +188,9 @@ public final class MVRTreeMap<V> extends MVMap<SpatialKey, V> {
                     removedPositions = new long[count];
                     count = 0;
                     for (Page page : removedPages) {
-                        if (page.isSaved()) {
-                            removedPositions[count++] = page.getPos();
+                        long pagePos = page.getPos();
+                        if (DataUtils.isPageSaved(pagePos) && DataUtils.getPageChunkId(pagePos) <= version) {
+                            removedPositions[count++] = pagePos;
                         }
                     }
                 }

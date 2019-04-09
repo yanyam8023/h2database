@@ -37,13 +37,15 @@ public class CursorPos
         this.parent = parent;
     }
 
-    long[] collectRemovedPagePositions(MVMap.IntValueHolder unsavedMemoryHolder) {
+    long[] collectRemovedPagePositions(MVMap.IntValueHolder unsavedMemoryHolder, long version) {
         int count = 0;
         int unsavedMemory = 0;
         for (CursorPos head = this; head != null; head = head.parent) {
             Page page = head.page;
             if (page.isSaved()) {
-                ++count;
+                if (DataUtils.getPageChunkId(page.getPos()) <= version) {
+                    ++count;
+                }
             } else {
                 unsavedMemory += page.getMemory();
             }
@@ -56,7 +58,7 @@ public class CursorPos
         count = 0;
         for (CursorPos head = this; head != null; head = head.parent) {
             long pagePos = head.page.getPos();
-            if (DataUtils.isPageSaved(pagePos)) {
+            if (DataUtils.isPageSaved(pagePos) && DataUtils.getPageChunkId(pagePos) <= version) {
                 positions[count++] = pagePos;
             }
         }
