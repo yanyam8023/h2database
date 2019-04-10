@@ -1938,24 +1938,26 @@ public class MVStore implements AutoCloseable {
         // now re-use the empty space
         reuseSpace = true;
         for (Chunk c : move) {
-            // ignore if already removed during the previous store operation
-            if (chunks.containsKey(c.id)) {
-                moveChunk(c, false);
-            }
+            moveChunk(c, false);
         }
 
         // update the metadata (within the file)
         commit();
         sync();
-        if (chunks.containsKey(chunk.id)) {
-            moveChunk(chunk, false);
+        if (moveChunk(chunk, false)) {
             commit();
         }
         shrinkFileIfPossible(0);
         sync();
     }
 
-    private void moveChunk(Chunk c, boolean toTheEnd) {
+    private boolean moveChunk(Chunk c, boolean toTheEnd) {
+        // ignore if already removed during the previous store operations
+        // those are possible either as explicit commit calls
+        // or from meta map updates at the end of this method
+        if (!chunks.containsKey(c.id)) {
+            return false;
+        }
         WriteBuffer buff = getWriteBuffer();
         long start = c.block * BLOCK_SIZE;
         int length = c.len * BLOCK_SIZE;
@@ -1978,6 +1980,7 @@ public class MVStore implements AutoCloseable {
         releaseWriteBuffer(buff);
         meta.put(Chunk.getMetaKey(c.id), c.asString());
         markMetaChanged();
+        return true;
     }
 
     private long allocateFileSpace(int length, boolean atTheEnd) {
@@ -2169,7 +2172,7 @@ public class MVStore implements AutoCloseable {
             }
         }
         rewritedPageCount += meta.rewrite(set);
-        store();
+        commit();
         return rewritedPageCount;
     }
 
