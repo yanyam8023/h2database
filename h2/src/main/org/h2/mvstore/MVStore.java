@@ -2350,16 +2350,14 @@ public class MVStore implements AutoCloseable {
      *
      * @return the version
      */
-    public long getOldestVersionToKeep() {
+    long getOldestVersionToKeep() {
         long v = oldestVersionToKeep.get();
-        if (fileStore == null) {
-            v = Math.max(v - versionsToKeep + 1, INITIAL_VERSION);
-            return v;
-        }
-
-        long storeVersion = currentStoreVersion;
-        if (storeVersion != INITIAL_VERSION && storeVersion < v) {
-            v = storeVersion;
+        v = Math.max(v - versionsToKeep, INITIAL_VERSION);
+        if (fileStore != null) {
+            long storeVersion = lastStoredVersion;
+            if (storeVersion != INITIAL_VERSION && storeVersion < v) {
+                v = storeVersion;
+            }
         }
         return v;
     }
