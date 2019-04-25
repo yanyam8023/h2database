@@ -13,10 +13,12 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import org.h2.compress.Compressor;
 import org.h2.message.DbException;
 import org.h2.mvstore.type.DataType;
@@ -39,7 +41,7 @@ import org.h2.util.Utils;
  * leaf: values (one for each key)
  * node: children (1 more than keys)
  */
-public abstract class Page implements Cloneable
+public abstract class Page implements Cloneable, RootReference.VisitablePages
 {
     /**
      * Map this page belongs to
@@ -49,7 +51,7 @@ public abstract class Page implements Cloneable
     /**
      * Position of this page's saved image within a Chunk or 0 if this page has not been saved yet.
      */
-    private long pos;
+    private volatile long pos;
 
     /**
      * The last result of a find operation is cached.
@@ -70,6 +72,10 @@ public abstract class Page implements Cloneable
      * The keys.
      */
     private Object[] keys;
+
+    public long id = idGenerator.incrementAndGet();
+
+    static final AtomicLong idGenerator = new AtomicLong();
 
     /**
      * The estimated number of bytes used per child entry.
@@ -400,7 +406,7 @@ public abstract class Page implements Cloneable
      * @param buff append buffer
      */
     protected void dump(StringBuilder buff) {
-        buff.append("id: ").append(System.identityHashCode(this)).append('\n');
+        buff.append("id: ").append(/*System.identityHashCode(this)*/id).append('\n');
         buff.append("pos: ").append(Long.toHexString(pos)).append('\n');
         if (isSaved()) {
             int chunkId = DataUtils.getPageChunkId(pos);
@@ -416,6 +422,7 @@ public abstract class Page implements Cloneable
     public final Page copy() {
         Page newPage = clone();
         newPage.pos = 0;
+        newPage.id = idGenerator.incrementAndGet();
         return newPage;
     }
 
@@ -633,8 +640,9 @@ public abstract class Page implements Cloneable
      * @param chunkId the chunk id
      */
     private void read(ByteBuffer buff, int chunkId) {
-        int pageLength = buff.remaining() + 4;  // size of int, since we've read page length already
+        int pageLength = buff.remaining() + 10;  // size of int + short + varint, since we've read page length, check and mapId already
         int len = DataUtils.readVarInt(buff);
+        id = DataUtils.readVarLong(buff);
         keys = createKeyStorage(len);
         int type = buff.get();
         if(isLeaf() != ((type & 1) == PAGE_TYPE_LEAF)) {
@@ -697,7 +705,7 @@ public abstract class Page implements Cloneable
         buff.putInt(0).
             putShort((byte) 0).
             putVarInt(map.getId()).
-            putVarInt(len);
+            putVarInt(len).putVarLong(id);
         int typePos = buff.position();
         buff.put((byte) type);
         writeChildren(buff, true);
@@ -744,6 +752,9 @@ public abstract class Page implements Cloneable
                     DataUtils.ERROR_INTERNAL, "Page already stored");
         }
         pos = DataUtils.getPagePos(chunkId, start, pageLength, type);
+//        if (wasRemovedAt == map.getStore().getLastStoredVersion()+1) {
+//            System.err.println("wasRemovedAt=" + wasRemovedAt +  " id: " + id +" pos: " + pos + " chunk: " + DataUtils.getPageChunkId(pos));
+//        }
         store.cachePage(this);
         if (type == DataUtils.PAGE_TYPE_NODE) {
             // cache again - this will make sure nodes stays in the cache
@@ -755,6 +766,15 @@ public abstract class Page implements Cloneable
         chunk.maxLenLive += max;
         chunk.pageCount++;
         chunk.pageCountLive++;
+        assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.put(pos, getMapId()) == null;
+        assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.size() == chunk.pageCountLive;
+        assert chunk.pagePosToPageId == null || chunk.pagePosToPageId.put(pos, id) == null;
+        assert chunk.pagePosToPageId == null || chunk.pagePosToPageId.size() == chunk.pageCountLive;
+        ConcurrentHashMap<Long, Long> toBeDeleted = map.getStore().pagesToBeDeleted;
+        if (toBeDeleted.containsKey(id)) {
+            toBeDeleted.put(id, pos);
+            toBeDeleted.put(pos, id);
+        }
         diskSpaceUsed = max != DataUtils.PAGE_LARGE ? max : pageLength;
         return typePos + 1;
     }
@@ -889,7 +909,9 @@ public abstract class Page implements Cloneable
 //    public abstract void removeAllRecursive();
 
     public void visitPages(Visitor visitor) {
-        visitor.visit(this, pos);
+        if (getTotalCount() > 0) {
+            visitor.visit(this, pos);
+        }
     }
 
     /**
@@ -1270,6 +1292,9 @@ public abstract class Page implements Cloneable
                 long pagePos = ref.getPos();
                 Page page = ref.getPage();
                 if (DataUtils.isLeafPosition(pagePos)) {
+                    if (page == null) {
+                        page = getChildPage(i);
+                    }
                     visitor.visit(page, pagePos);
                 } else {
                     if (page == null) {

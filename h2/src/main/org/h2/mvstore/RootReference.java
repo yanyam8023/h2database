@@ -62,7 +62,7 @@ public final class RootReference
         this.removalInfo = null;
     }
 
-    private RootReference(RootReference r, Page root, long updateAttemptCounter, long[] removedPositions) {
+    private RootReference(RootReference r, Page root, long updateAttemptCounter, VisitablePages removedPositions) {
         this.root = root;
         this.version = r.version;
         this.previous = r.previous;
@@ -83,12 +83,12 @@ public final class RootReference
         this.updateAttemptCounter = r.updateAttemptCounter + attempt;
         this.lockedForUpdate = true;
         this.appendCounter = r.appendCounter;
-        this.removalInfo = null;
+        this.removalInfo = r.removalInfo;
     }
 
     // This one is used for unlocking
     private RootReference(RootReference r, Page root, int appendCounter, boolean lockedForUpdate,
-                  long[] removedPositions) {
+                          VisitablePages removedPositions) {
         this.root = root;
         this.version = r.version;
         this.previous = r.previous;
@@ -112,8 +112,7 @@ public final class RootReference
         this.removalInfo = null;
     }
 
-
-    RootReference updateRootPage(Page page, long attemptCounter, long[] removedPositions) {
+    RootReference updateRootPage(Page page, long attemptCounter, VisitablePages removedPositions) {
         return new RootReference(this, page, attemptCounter, removedPositions);
     }
 
@@ -125,10 +124,15 @@ public final class RootReference
         return new RootReference(this, previous, version, attempt);
     }
 
-    RootReference updatePageAndLockedStatus(Page page, int appendCounter, boolean lockedForUpdate, long[] removedPositions) {
+    RootReference updatePageAndLockedStatus(Page page, int appendCounter, boolean lockedForUpdate, VisitablePages removedPositions) {
         return new RootReference(this, page, appendCounter, lockedForUpdate, removedPositions);
     }
 
+    long getVersion() {
+        return previous == null || previous.root != root ||
+                previous.appendCounter != appendCounter ?
+                    version : previous.version;
+    }
 
     boolean hasRemovalInfo() {
         return removalInfo != null;
@@ -153,6 +157,10 @@ public final class RootReference
         return "RootReference(" + System.identityHashCode(root) + "," + version + "," + lockedForUpdate + ")";
     }
 
+    public  interface VisitablePages {
+//        int getPageCount();
+        void visitPages(Page.Visitor visitor);
+    }
 
     static class ListNode<T>
     {
@@ -169,10 +177,10 @@ public final class RootReference
         }
     }
 
-    static class RemovalInfoNode extends ListNode<long[]>
+    static class RemovalInfoNode extends ListNode<VisitablePages>
     {
 
-        public RemovalInfoNode(long[] data, ListNode<long[]> next) {
+        public RemovalInfoNode(VisitablePages data, ListNode<VisitablePages> next) {
             super(data, next);
         }
 

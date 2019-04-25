@@ -5,13 +5,15 @@
  */
 package org.h2.mvstore;
 
+import java.util.concurrent.ConcurrentHashMap;
+
 /**
  * A position in a cursor.
  * Instance represents a node in the linked list, which traces path
  * fom a specific (target) key within a leaf node all the way up to te root
  * (bottom up path).
  */
-public class CursorPos
+public class CursorPos implements RootReference.VisitablePages
 {
     /**
      * The page at the current level.
@@ -35,6 +37,31 @@ public class CursorPos
         this.page = page;
         this.index = index;
         this.parent = parent;
+    }
+
+    @Override
+    public void visitPages(Page.Visitor visitor) {
+        for (CursorPos head = this; head != null; head = head.parent) {
+            Page page = head.page;
+            if (page.getTotalCount() > 0) {
+                long pagePos = page.getPos();
+                visitor.visit(page, pagePos);
+            }
+        }
+    }
+
+    public void markRemovedPages() {
+        ConcurrentHashMap<Long, Long> toBeDeleted = page.map.getStore().pagesToBeDeleted;
+        for (CursorPos head = this; head != null; head = head.parent) {
+            Page page = head.page;
+            if (page.getTotalCount() > 0) {
+                long pagePos = page.getPos();
+                toBeDeleted.put(page.id, pagePos);
+                if (DataUtils.isPageSaved(pagePos)) {
+                    toBeDeleted.put(pagePos, page.id);
+                }
+            }
+        }
     }
 
     long[] collectRemovedPagePositions(MVMap.IntValueHolder unsavedMemoryHolder, long version) {

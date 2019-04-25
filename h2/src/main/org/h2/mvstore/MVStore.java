@@ -217,7 +217,7 @@ public class MVStore implements AutoCloseable {
     /**
      * The map of chunks.
      */
-    private final ConcurrentHashMap<Integer, Chunk> chunks =
+    public final ConcurrentHashMap<Integer, Chunk> chunks =
             new ConcurrentHashMap<>();
 
     private long updateCounter = 0;
@@ -317,6 +317,8 @@ public class MVStore implements AutoCloseable {
 
     private long lastTimeAbsolute;
 
+    public final ConcurrentHashMap<Long,Long> pagesToBeDeleted = new ConcurrentHashMap<>();
+
 
     /**
      * Create and open the store.
@@ -375,7 +377,7 @@ public class MVStore implements AutoCloseable {
             int kb = Math.max(1, Math.min(19, Utils.scaleForAvailableMemory(64))) * 1024;
             kb = DataUtils.getConfigParam(config, "autoCommitBufferSize", kb);
             autoCommitMemory = kb * 1024;
-            autoCompactFillRate = DataUtils.getConfigParam(config, "autoCompactFillRate", 40);
+            autoCompactFillRate = DataUtils.getConfigParam(config, "autoCompactFillRate", 95);
             char[] encryptionKey = (char[]) config.get("encryptionKey");
             try {
                 if (!fileStoreIsProvided) {
@@ -1036,7 +1038,12 @@ public class MVStore implements AutoCloseable {
                                 }
                                 commit();
                                 assert validateFileLength("on close");
+//                                doMaintance();
                                 shrinkFileIfPossible(0);
+                                System.out.println("On close of " + System.identityHashCode(this) +
+                                                    ": fill rate: " + getFileStore().getFillRate() +
+                                                    "%, chunk fill rate: " + getChunksFillRate() +
+                                                    "%, file size: " + fileStore.getFileLengthInUse());
                             }
 
                             state = STATE_CLOSING;
@@ -1114,17 +1121,18 @@ public class MVStore implements AutoCloseable {
         buff.limit(start + pageLength);
 
         short check = buff.getShort();
-        int mapId = DataUtils.readVarInt(buff);
-        if (mapId != expectedMapId) {
-            throw DataUtils.newIllegalStateException(DataUtils.ERROR_FILE_CORRUPT,
-                    "File corrupted in chunk {0}, expected map id {1}, got {2}", chunkId, expectedMapId, mapId);
-        }
         int checkTest = DataUtils.getCheckValue(chunkId)
                 ^ DataUtils.getCheckValue(offset)
                 ^ DataUtils.getCheckValue(pageLength);
         if (check != (short) checkTest) {
             throw DataUtils.newIllegalStateException(DataUtils.ERROR_FILE_CORRUPT,
                     "File corrupted in chunk {0}, expected check value {1}, got {2}", chunkId, checkTest, check);
+        }
+
+        int mapId = DataUtils.readVarInt(buff);
+        if (mapId != expectedMapId) {
+            throw DataUtils.newIllegalStateException(DataUtils.ERROR_FILE_CORRUPT,
+                    "File corrupted in chunk {0}, expected map id {1}, got {2}", chunkId, expectedMapId, mapId);
         }
         return buff;
     }
@@ -1160,6 +1168,7 @@ public class MVStore implements AutoCloseable {
     private void setWriteVersion(long version) {
         for (Iterator<MVMap<?, ?>> iter = maps.values().iterator(); iter.hasNext(); ) {
             MVMap<?, ?> map = iter.next();
+            assert map != meta;
             if (map.setWriteVersion(version) == null) {
                 iter.remove();
             }
@@ -1251,6 +1260,7 @@ public class MVStore implements AutoCloseable {
             // to allow closing the store
             currentStoreVersion = -1;
         }
+        dropUnusedChunks();
     }
 
     private void storeNow() {
@@ -1300,23 +1310,23 @@ public class MVStore implements AutoCloseable {
         c.version = version;
         c.next = Long.MAX_VALUE;
         chunks.put(c.id, c);
-        ArrayList<Page> changed = new ArrayList<>();
+        ArrayList<RootReference> changed = new ArrayList<>();
         for (Iterator<MVMap<?, ?>> iter = maps.values().iterator(); iter.hasNext(); ) {
             MVMap<?, ?> map = iter.next();
-            RootReference rootReference = map.setWriteVersion(version);
+            RootReference rootReference = map.setWriteVersion(version, false);
             if (rootReference == null) {
                 iter.remove();
             } else if (map.getCreateVersion() <= storeVersion && // if map was created after storing started, skip it
                     !map.isVolatile() &&
                     map.hasChangesSince(lastStoredVersion)) {
-                assert rootReference.version <= version : rootReference.version + " > " + version;
+//                assert rootReference.version <= version : rootReference.version + " > " + version;
                 Page rootPage = rootReference.root;
                 if (!rootPage.isSaved() ||
                         // after deletion previously saved leaf
                         // may pop up as a root, but we still need
                         // to save new root pos in meta
                         rootPage.isLeaf()) {
-                    changed.add(rootPage);
+                    changed.add(rootReference);
                 }
             }
         }
@@ -1326,9 +1336,12 @@ public class MVStore implements AutoCloseable {
         int headerLength = buff.position();
         c.pageCount = 0;
         c.pageCountLive = 0;
+        assert c.pagePosToMapId.isEmpty();
+        assert c.pagePosToPageId.isEmpty();
         c.maxLen = 0;
         c.maxLenLive = 0;
-        for (Page p : changed) {
+        for (RootReference rootReference : changed) {
+            Page p = rootReference.root;
             String key = MVMap.getMapRootKey(p.getMapId());
             if (p.getTotalCount() == 0) {
                 meta.remove(key);
@@ -1337,16 +1350,26 @@ public class MVStore implements AutoCloseable {
                 long root = p.getPos();
                 meta.put(key, Long.toHexString(root));
             }
+            RootReference.RemovalInfoNode removalInfo = rootReference.extractRemovalInfo();
+            accountForRemovedPages(removalInfo, version);
         }
 
-        RootReference metaRootReference = meta.setWriteVersion(version);
-        assert metaRootReference != null;
-        assert metaRootReference.version == version : metaRootReference.version + " != " + version;
-        metaChanged = false;
-        onVersionChange(version);
+        int cnt = 0;
+        Page metaRoot;
+        RootReference.RemovalInfoNode removalInfo;
+        do {
+            RootReference metaRootReference = meta.setWriteVersion(version, false);
+            assert metaRootReference != null;
+//            assert metaRootReference.version == version : metaRootReference.version + " != " + version;
 
-        Page metaRoot = metaRootReference.root;
-        metaRoot.writeUnsavedRecursive(c, buff);
+            metaChanged = false;
+            metaRoot = metaRootReference.root;
+            metaRoot.writeUnsavedRecursive(c, buff);
+
+            removalInfo = metaRootReference.extractRemovalInfo();
+        } while(meta.isPersistent() && removalInfo != null && accountForRemovedPages(removalInfo, version) && ++cnt > 0);
+
+        onVersionChange(version);
 
         // last allocated map id should be captured after the meta map was saved, because
         // this will ensure that concurrently created map, which made it into meta before save,
@@ -1425,7 +1448,8 @@ public class MVStore implements AutoCloseable {
             // may only shrink after the store header was written
             shrinkFileIfPossible(1);
         }
-        for (Page p : changed) {
+        for (RootReference rootReference : changed) {
+            Page p = rootReference.root;
             p.writeEnd();
         }
         metaRoot.writeEnd();
@@ -1436,7 +1460,6 @@ public class MVStore implements AutoCloseable {
                 - currentUnsavedPageCount);
 
         lastStoredVersion = storeVersion;
-        dropUnusedChunks();
     }
 
     /**
@@ -2055,6 +2078,7 @@ public class MVStore implements AutoCloseable {
             try {
                 if (!storeLock.isHeldByCurrentThread() &&
                         storeLock.tryLock(10, TimeUnit.MILLISECONDS)) {
+                    TxCounter txCounter = registerVersionUsage();
                     try {
                         Iterable<Chunk> old = findOldChunks(targetFillRate, write);
                         if (old != null) {
@@ -2062,6 +2086,7 @@ public class MVStore implements AutoCloseable {
                             return !idSet.isEmpty() && compactRewrite(idSet) > 0;
                         }
                     } finally {
+                        deregisterVersionUsage(txCounter);
                         storeLock.unlock();
                     }
                 }
@@ -2087,15 +2112,15 @@ public class MVStore implements AutoCloseable {
         for (Chunk c : chunks.values()) {
             assert c.maxLen >= 0;
             maxLengthSum += c.maxLen;
-            if (c.time + retentionTime > time) {
+//            if (c.time + retentionTime > time) {
                 // young chunks (we don't optimize those):
                 // assume if they are fully live
                 // so that we don't try to optimize yet
                 // until they get old
-                maxLengthLiveSum += c.maxLen;
-            } else {
+//                maxLengthLiveSum += c.maxLen;
+//            } else {
                 maxLengthLiveSum += c.maxLenLive;
-            }
+//            }
         }
         // the fill rate of all chunks combined
         int fillRate = (int) (100 * maxLengthLiveSum / maxLengthSum);
@@ -2169,10 +2194,56 @@ public class MVStore implements AutoCloseable {
             MVMap<Object, Object> map = (MVMap<Object, Object>) m;
             if (!map.isClosed()) {
                 rewritedPageCount += map.rewrite(set);
+/*
+                for (Integer chunkId : set) {
+                    Chunk chunk = chunks.get(chunkId);
+                    if (chunk != null) {
+                        for (Integer value : chunk.pagePosToMapId.values()) {
+                            assert value != m.getId() : chunkId + " " + value +  " " + chunk.pagePosToMapId;
+                        }
+                    }
+                }
+*/
             }
         }
         rewritedPageCount += meta.rewrite(set);
+/*
+        for (Integer chunkId : set) {
+            Chunk chunk = chunks.get(chunkId);
+            if (chunk != null) {
+                for (Integer value : chunk.pagePosToMapId.values()) {
+                    assert value != meta.getId() : chunkId + " " + value +  " " + chunk.pagePosToMapId;
+                }
+            }
+        }
+*/
         commit();
+        for (Integer chunkId : set) {
+            Chunk chunk = chunks.get(chunkId);
+//            assert chunk == null || chunk.pageCountLive == 0;
+            if (chunk != null && chunk.pageCountLive != 0) {
+                if (chunk.pagePosToMapId != null) {
+                    assert chunk.pageCountLive == chunk.pagePosToMapId.size();
+                    for (Map.Entry<Long, Integer> entry : chunk.pagePosToMapId.entrySet()) {
+                        long pagePos = entry.getKey();
+                        int mapId = entry.getValue();
+                        MVMap<?, ?> map = mapId == 0 ? meta : getMap(mapId);
+                        if (map != null) {
+//                            assert map != null : mapId;
+                            //                    ByteBuffer buff = readBufferForPage(pagePos, map.getId());
+                            //                    Page page = Page.read(buff, pagePos, map);
+                            Page page = readPage(map, pagePos);
+                            //                    assert page.wasRemovedAt != 0 : page;
+                            System.err.println(pagePos + " -> " + page.id + " " + pagesToBeDeleted.get(page.id));
+                        }
+                    }
+                }
+                assert pagesToBeDeleted.size() < 0 : chunk +
+                        "\npagePosToMapId:\n" + chunk.pagePosToMapId +
+                        "\npagePosToPageId:\n" + chunk.pagePosToPageId +
+                        "\nchunkIds: " + set + "\npagesToBeDeleted: " + pagesToBeDeleted;
+            }
+        }
         return rewritedPageCount;
     }
 
@@ -2205,34 +2276,67 @@ public class MVStore implements AutoCloseable {
         return p;
     }
 
-    boolean accountForRemovedPages(RootReference.RemovalInfoNode removalInfo, final long version) {
+    private boolean accountForRemovedPages(RootReference.RemovalInfoNode removalInfo, final long version) {
+        final Set<Long> removedPos = new HashSet<>();
         final Set<Chunk> modified = new HashSet<>();
         while (removalInfo != null) {
-            long time = 0;
-            for (long pagePos : removalInfo.data) {
-                assert DataUtils.isPageSaved(pagePos);
-                int chunkId = DataUtils.getPageChunkId(pagePos);
-                int pageLength = DataUtils.getPageMaxLength(pagePos);
+            RootReference.VisitablePages pages = removalInfo.data;
+            pages.visitPages(new Page.Visitor() {
+                private long time = 0;
 
-                Chunk chunk = chunks.get(chunkId);
-                chunk.maxLenLive -= pageLength;
-                chunk.pageCountLive -= 1;
-
-                assert chunk.pageCountLive >= 0 : chunk;
-                assert chunk.maxLenLive >= 0 : chunk;
-                assert (chunk.pageCountLive == 0) == (chunk.maxLenLive == 0) : chunk;
-
-                if (chunk.pageCountLive == 0 && chunk.maxLenLive == 0) {
-                    chunk.unusedAtVersion = version;
-                    if (time == 0) {
-                        time = getTimeSinceCreation();
+                @Override
+                public void visit(Page page, long pagePos) {
+                    if (!DataUtils.isPageSaved(pagePos) || DataUtils.getPageChunkId(pagePos) > version) {
+                        return;
                     }
-                    chunk.unused = time;
+                    assert removedPos.add(pagePos) : pagePos;
+                    assert DataUtils.isPageSaved(pagePos);
+                    int chunkId = DataUtils.getPageChunkId(pagePos);
+                    int pageLength = DataUtils.getPageMaxLength(pagePos);
+
+                    Chunk chunk = chunks.get(chunkId);
+                    assert chunk.pagePosToMapId == null || chunk.pageCountLive == chunk.pagePosToMapId.size() :
+                            chunk.pageCountLive + " != " + chunk.pagePosToMapId.size() + " " + chunk + " " + chunk.pagePosToMapId;
+                    assert chunk.pagePosToPageId == null || chunk.pageCountLive == chunk.pagePosToPageId.size() :
+                            chunk.pageCountLive + " != " + chunk.pagePosToPageId.size() + " " + chunk + " " + chunk.pagePosToPageId;
+                    chunk.maxLenLive -= pageLength;
+                    chunk.pageCountLive--;
+
+                    Integer mapId = null;
+                    if (chunk.pagePosToMapId != null) {
+                        mapId = chunk.pagePosToMapId.remove(pagePos);
+//                        assert mapId != null : chunk + " " + chunk.pagePosToMapId;
+                    }
+
+                    Long pageId = null;
+                    if (chunk.pagePosToPageId != null) {
+                        pageId = chunk.pagePosToPageId.remove(pagePos);
+//                        assert pageId != null : chunk + " " + chunk.pagePosToPageId;
+                    }
+
+                    Long pgId = pagesToBeDeleted.remove(pagePos);
+                    if (pgId == null) {
+                        pgId = pageId;
+                    } else if (pageId != null) {
+                        assert pgId.equals(pageId) : pgId + " <> " + pageId;
+                    }
+
+                    assert chunk.pageCountLive >= 0 : chunk;
+                    assert chunk.maxLenLive >= 0 : chunk;
+                    assert (chunk.pageCountLive == 0) == (chunk.maxLenLive == 0) : chunk;
+
+                    if (chunk.pageCountLive == 0 && chunk.maxLenLive == 0) {
+                        chunk.unusedAtVersion = version;
+                        if (time == 0) {
+                            time = getTimeSinceCreation();
+                        }
+                        chunk.unused = time;
+                    }
+                    if (chunk.isSaved()) {
+                        modified.add(chunk);
+                    }
                 }
-                if (chunk.isSaved()) {
-                    modified.add(chunk);
-                }
-            }
+            });
             removalInfo = removalInfo.getNext();
         }
         if (!modified.isEmpty()) {
@@ -2445,7 +2549,7 @@ public class MVStore implements AutoCloseable {
      * @param map the map
      */
     void beforeWrite(MVMap<?, ?> map) {
-        if (saveNeeded && fileStore != null && isOpenOrStopping()) {
+        if (saveNeeded && fileStore != null && isOpenOrStopping() && map != meta) {
             saveNeeded = false;
             // check again, because it could have been written by now
             if (unsavedMemory > autoCommitMemory && autoCommitMemory > 0) {
@@ -2707,10 +2811,10 @@ public class MVStore implements AutoCloseable {
                     "Removing the meta map is not allowed");
             map.close();
             RootReference rootReference = map.clearIt();
-            RootReference.RemovalInfoNode removalInfo = rootReference.extractRemovalInfo();
-            if (map.isPersistent() && removalInfo != null) {
-                accountForRemovedPages(removalInfo, currentVersion);
-            }
+//            RootReference.RemovalInfoNode removalInfo = rootReference.extractRemovalInfo();
+//            if (map.isPersistent() && removalInfo != null) {
+//                accountForRemovedPages(removalInfo, currentVersion);
+//            }
 
             updateCounter += rootReference.updateCounter;
             updateAttemptCounter += rootReference.updateAttemptCounter;
@@ -2785,27 +2889,74 @@ public class MVStore implements AutoCloseable {
             // but according to a test it doesn't really help
 
             long time = getTimeSinceCreation();
-            if (time <= lastCommitTime + autoCommitDelay) {
-                return;
+            if (time > lastCommitTime + autoCommitDelay) {
+                tryCommit();
             }
-            tryCommit();
-            if (autoCompactFillRate > 0) {
-                // whether there were file read or write operations since
-                // the last time
-                boolean fileOps;
-                long fileOpCount = fileStore.getWriteCount() + fileStore.getReadCount();
-                if (autoCompactLastFileOpCount != fileOpCount) {
-                    fileOps = true;
-                } else {
-                    fileOps = false;
-                }
-                // use a lower fill rate if there were any file operations
-                int targetFillRate = fileOps ? autoCompactFillRate / 3 : autoCompactFillRate;
-                compact(targetFillRate, autoCommitMemory);
-                autoCompactLastFileOpCount = fileStore.getWriteCount() + fileStore.getReadCount();
-            }
+
+            doMaintance();
         } catch (Throwable e) {
             handleException(e);
+            if (backgroundExceptionHandler == null) {
+                throw e;
+            }
+        }
+    }
+
+    private void doMaintance() {
+        if (autoCompactFillRate > 0 && lastChunk != null && reuseSpace) {
+            int fillRate = fileStore.getFillRate();
+            int chunksFillRate = getChunksFillRate();
+            int effectiveFillRate = fillRate * chunksFillRate / 100;
+            if (effectiveFillRate < autoCompactFillRate) {
+                storeLock.lock();
+                try {
+                    int oldRetentionTime = retentionTime;
+                    boolean oldReuse = reuseSpace;
+                    try {
+                        retentionTime = -1;
+                        dropUnusedChunks();
+                        fillRate = fileStore.getFillRate();
+                        chunksFillRate = getChunksFillRate();
+                        if ((100 - chunksFillRate) > 2 * (100 - fillRate)) {
+                            int writeLimit = autoCommitMemory * autoCompactFillRate / Math.max(chunksFillRate, 1);
+                            TxCounter txCounter = registerVersionUsage();
+                            try {
+                                Iterable<Chunk> old = findOldChunks(autoCompactFillRate, writeLimit);
+                                if (old != null) {
+                                    HashSet<Integer> idSet = createIdSet(old);
+                                    if (!idSet.isEmpty() && compactRewrite(idSet) > 0) {
+                                        dropUnusedChunks();
+                                        fillRate = fileStore.getFillRate();
+                                    }
+                                }
+                            } finally {
+                                deregisterVersionUsage(txCounter);
+                            }
+                        }
+
+                    } finally {
+                        reuseSpace = oldReuse;
+                        retentionTime = oldRetentionTime;
+                    }
+
+                    if (fillRate < autoCompactFillRate) {
+                        int writeLimit = autoCommitMemory * autoCompactFillRate / fillRate;
+                        long start = fileStore.getFirstFree() / BLOCK_SIZE;
+                        long maxBlocksToMove = writeLimit / BLOCK_SIZE;
+                        Iterable<Chunk> move = findChunksToMove(start, maxBlocksToMove);
+                        compactMoveChunks(move);
+                    }
+                } finally {
+                    storeLock.unlock();
+                }
+            }
+        }
+        if (currentVersion % 100 == 0) {
+            System.out.println("V." + currentVersion + " of " + System.identityHashCode(this) +
+                                ": fill rate: " + getFileStore().getFillRate() +
+                                "%, chunk fill rate: " + getChunksFillRate() +
+                                "%, file size: " + fileStore.getFileLengthInUse());
+
         }
     }
 

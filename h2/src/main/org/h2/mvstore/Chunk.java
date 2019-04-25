@@ -7,7 +7,9 @@ package org.h2.mvstore;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.Map;
 
 /**
  * A chunk of data, containing one or multiple pages.
@@ -114,6 +116,9 @@ public class Chunk {
      */
     public long next;
 
+    public Map<Long,Integer> pagePosToMapId = Collections.synchronizedMap(new HashMap<Long,Integer>());
+    public Map<Long,Long> pagePosToPageId = Collections.synchronizedMap(new HashMap<Long,Long>());
+
     Chunk(int id) {
         this.id = id;
     }
@@ -202,6 +207,8 @@ public class Chunk {
         c.unusedAtVersion = DataUtils.readHexLong(map, "unusedAtVersion", 0);
         c.version = DataUtils.readHexLong(map, "version", id);
         c.next = DataUtils.readHexLong(map, "next", 0);
+        c.pagePosToMapId = null;
+        c.pagePosToPageId = null;
         return c;
     }
 

@@ -139,8 +139,8 @@ public final class MVRTreeMap<V> extends MVMap<SpatialKey, V> {
             ++attempt;
             RootReference rootReference = flushAndGetRoot();
             Page p = rootReference.root;
-            long version = rootReference.version;
-            if (removedPages != null) {
+//            long version = rootReference.version;
+            if (removedPages != null && p.getTotalCount() > 0) {
                 removedPages.add(p);
             }
             p = p.copy();
@@ -170,34 +170,28 @@ public final class MVRTreeMap<V> extends MVMap<SpatialKey, V> {
                 }
             }
 
-            long[] removedPositions = null;
             int unsavedMemory = 0;
-            if (removedPages != null) {
-                int count = 0;
-                for (Page page : removedPages) {
-                    long pagePos = page.getPos();
-                    if (DataUtils.isPageSaved(pagePos)) {
-                        if (DataUtils.getPageChunkId(pagePos) <= version) {
-                            ++count;
+            RootReference.VisitablePages removedInfo = removedPages == null ? null :
+                    new RootReference.VisitablePages() {
+                        @Override
+                        public void visitPages(Page.Visitor visitor) {
+                            for (Page page : removedPages) {
+                                visitor.visit(page, page.getPos());
+                            }
                         }
-                    } else {
-                        unsavedMemory -= page.getMemory();
-                    }
-                }
-                if (count != 0) {
-                    removedPositions = new long[count];
-                    count = 0;
-                    for (Page page : removedPages) {
-                        long pagePos = page.getPos();
-                        if (DataUtils.isPageSaved(pagePos) && DataUtils.getPageChunkId(pagePos) <= version) {
-                            removedPositions[count++] = pagePos;
-                        }
-                    }
-                }
-            }
+                    };
 
-            if(updateRoot(rootReference, p, attempt, removedPositions)) {
+            if(updateRoot(rootReference, p, attempt, removedInfo)) {
                 if (isPersistent()) {
+                    if (removedPages != null) {
+                        for (Page page : removedPages) {
+                            long pagePos = page.getPos();
+                            store.pagesToBeDeleted.put(page.id, pagePos);
+                            if (DataUtils.isPageSaved(pagePos)) {
+                                store.pagesToBeDeleted.put(pagePos, page.id);
+                            }
+                        }
+                    }
                     store.registerUnsavedPage(unsavedMemory);
                 }
                 return result;

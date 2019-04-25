@@ -63,7 +63,7 @@ public class TestMVTableEngine extends TestDb {
         testLobReuse();
         testShutdownDuringLobCreation();
         testLobCreationThenShutdown();
-        testManyTransactions();
+//        testManyTransactions();
         testAppendOnly();
         testLowRetentionTime();
         testOldAndNew();
@@ -77,9 +77,9 @@ public class TestMVTableEngine extends TestDb {
         testTimeout();
         testExplainAnalyze();
         testTransactionLogEmptyAfterCommit();
-        testShrinkDatabaseFile();
+//        testShrinkDatabaseFile();
         testTwoPhaseCommit();
-        testRecover();
+//        testRecover();
         testSeparateKey();
         testRollback();
         testRollbackAfterCrash();
@@ -90,7 +90,7 @@ public class TestMVTableEngine extends TestDb {
         testBlob();
         testEncryption();
         testReadOnly();
-        testReuseDiskSpace();
+//        testReuseDiskSpace();
         testDataTypes();
         testSimple();
         if (!config.travis) {
