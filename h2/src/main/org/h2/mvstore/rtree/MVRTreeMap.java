@@ -183,15 +183,7 @@ public final class MVRTreeMap<V> extends MVMap<SpatialKey, V> {
 
             if(updateRoot(rootReference, p, attempt, removedInfo)) {
                 if (isPersistent()) {
-                    if (removedPages != null) {
-                        for (Page page : removedPages) {
-                            long pagePos = page.getPos();
-                            store.pagesToBeDeleted.put(page.id, pagePos);
-                            if (DataUtils.isPageSaved(pagePos)) {
-                                store.pagesToBeDeleted.put(pagePos, page.id);
-                            }
-                        }
-                    }
+                    assert removedPages == null || recordRemovals(removedPages);
                     store.registerUnsavedPage(unsavedMemory);
                 }
                 return result;
@@ -201,6 +193,17 @@ public final class MVRTreeMap<V> extends MVMap<SpatialKey, V> {
                 removedPages.clear();
             }
         }
+    }
+
+    private boolean recordRemovals(Collection<Page> removedPages) {
+        for (Page page : removedPages) {
+            long pagePos = page.getPos();
+            store.pagesToBeDeleted.put(page.id, pagePos);
+            if (DataUtils.isPageSaved(pagePos)) {
+                store.pagesToBeDeleted.put(pagePos, page.id);
+            }
+        }
+        return true;
     }
 
     @SuppressWarnings("unchecked")

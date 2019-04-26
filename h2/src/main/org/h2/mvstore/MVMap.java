@@ -423,19 +423,22 @@ public class MVMap<K, V> extends AbstractMap<K, V>
             rootReference = flushAndGetRoot();
             Page page = rootReference.root;
             rootReference = getUpdatedRoot(rootReference, emptyRootPage, ++attempt, page);
-            if (rootReference != null) {
-                page.visitPages(new Page.Visitor() {
-                    @Override
-                    public void visit(Page page, long pagePos) {
-                        store.pagesToBeDeleted.put(page.id, pagePos);
-                        if (DataUtils.isPageSaved(pagePos)) {
-                            store.pagesToBeDeleted.put(pagePos, page.id);
-                        }
-                    }
-                });
-            }
+            assert rootReference == null || recordRemovals(page);
         } while (rootReference == null);
         return rootReference;
+    }
+
+    private boolean recordRemovals(Page page) {
+        page.visitPages(new Page.Visitor() {
+            @Override
+            public void visit(Page page, long pagePos) {
+                store.pagesToBeDeleted.put(page.id, pagePos);
+                if (DataUtils.isPageSaved(pagePos)) {
+                    store.pagesToBeDeleted.put(pagePos, page.id);
+                }
+            }
+        });
+        return true;
     }
 
     /**
@@ -1091,7 +1094,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         while(true) {
             RootReference rootReference = flushAndGetRoot();
             assert rootReference.version <= writeVersion : rootReference.version + " > " + writeVersion;
-            if(rootReference.version >= writeVersion) {
+            if(rootReference.version > writeVersion) {
                 return rootReference;
             } else if (isClosed()) {
                 if (rootReference.getVersion() + 1 < store.getOldestVersionToKeep()) {

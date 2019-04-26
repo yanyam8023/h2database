@@ -1037,13 +1037,13 @@ public class MVStore implements AutoCloseable {
                                     }
                                 }
                                 commit();
-                                assert validateFileLength("on close");
 //                                doMaintance();
                                 shrinkFileIfPossible(0);
-                                System.out.println("On close of " + System.identityHashCode(this) +
-                                                    ": fill rate: " + getFileStore().getFillRate() +
-                                                    "%, chunk fill rate: " + getChunksFillRate() +
-                                                    "%, file size: " + fileStore.getFileLengthInUse());
+                                assert validateFileLength("on close");
+//                                System.out.println("On close of " + System.identityHashCode(this) +
+//                                                    ": fill rate: " + getFileStore().getFillRate() +
+//                                                    "%, chunk fill rate: " + getChunksFillRate() +
+//                                                    "%, file size: " + fileStore.getFileLengthInUse());
                             }
 
                             state = STATE_CLOSING;
@@ -2305,13 +2305,13 @@ public class MVStore implements AutoCloseable {
                     Integer mapId = null;
                     if (chunk.pagePosToMapId != null) {
                         mapId = chunk.pagePosToMapId.remove(pagePos);
-//                        assert mapId != null : chunk + " " + chunk.pagePosToMapId;
+                        assert mapId != null : chunk + " " + chunk.pagePosToMapId;
                     }
 
                     Long pageId = null;
                     if (chunk.pagePosToPageId != null) {
                         pageId = chunk.pagePosToPageId.remove(pagePos);
-//                        assert pageId != null : chunk + " " + chunk.pagePosToPageId;
+                        assert pageId != null : chunk + " " + chunk.pagePosToPageId;
                     }
 
                     Long pgId = pagesToBeDeleted.remove(pagePos);
@@ -2951,13 +2951,13 @@ public class MVStore implements AutoCloseable {
                 }
             }
         }
-        if (currentVersion % 100 == 0) {
-            System.out.println("V." + currentVersion + " of " + System.identityHashCode(this) +
-                                ": fill rate: " + getFileStore().getFillRate() +
-                                "%, chunk fill rate: " + getChunksFillRate() +
-                                "%, file size: " + fileStore.getFileLengthInUse());
-
-        }
+//        if (currentVersion % 100 == 0) {
+//            System.out.println("V." + currentVersion + " of " + System.identityHashCode(this) +
+//                                ": fill rate: " + getFileStore().getFillRate() +
+//                                "%, chunk fill rate: " + getChunksFillRate() +
+//                                "%, file size: " + fileStore.getFileLengthInUse());
+//
+//        }
     }
 
     private void handleException(Throwable ex) {

@@ -50,7 +50,7 @@ public class CursorPos implements RootReference.VisitablePages
         }
     }
 
-    public void markRemovedPages() {
+    void markRemovedPages() {
         ConcurrentHashMap<Long, Long> toBeDeleted = page.map.getStore().pagesToBeDeleted;
         for (CursorPos head = this; head != null; head = head.parent) {
             Page page = head.page;
