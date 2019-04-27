@@ -1085,29 +1085,7 @@ public class MVStore implements AutoCloseable {
      */
     ByteBuffer readBufferForPage(long pos, int expectedMapId) {
         Chunk c = getChunk(pos);
-        long filePos = c.block * BLOCK_SIZE;
-        filePos += DataUtils.getPageOffset(pos);
-        if (filePos < 0) {
-            throw DataUtils.newIllegalStateException(
-                    DataUtils.ERROR_FILE_CORRUPT,
-                    "Negative position {0}; p={1}, c={2}", filePos, pos, c.toString());
-        }
-        long maxPos = (c.block + c.len) * BLOCK_SIZE;
-
-        ByteBuffer buff;
-        int maxLength = DataUtils.getPageMaxLength(pos);
-        if (maxLength == DataUtils.PAGE_LARGE) {
-            buff = fileStore.readFully(filePos, 128);
-            maxLength = buff.getInt();
-            // read the first bytes again
-        }
-        maxLength = (int) Math.min(maxPos - filePos, maxLength);
-        int length = maxLength;
-        if (length < 0) {
-            throw DataUtils.newIllegalStateException(DataUtils.ERROR_FILE_CORRUPT,
-                    "Illegal page length {0} reading at {1}; max pos {2} ", length, filePos, maxPos);
-        }
-        buff = fileStore.readFully(filePos, length);
+        ByteBuffer buff = c.getBufferForPage(pos, fileStore);
         int chunkId = DataUtils.getPageChunkId(pos);
         int offset = DataUtils.getPageOffset(pos);
         int start = buff.position();
@@ -1299,10 +1277,14 @@ public class MVStore implements AutoCloseable {
             }
         }
         Chunk c = new Chunk(newChunkId);
-        c.pageCount = Integer.MAX_VALUE;
-        c.pageCountLive = Integer.MAX_VALUE;
-        c.maxLen = Long.MAX_VALUE;
-        c.maxLenLive = Long.MAX_VALUE;
+        c.pageCount = 0;
+        c.pageCountLive = 0;
+        c.maxLen = 0;
+        c.maxLenLive = 0;
+//        c.pageCount = Integer.MAX_VALUE;
+//        c.pageCountLive = Integer.MAX_VALUE;
+//        c.maxLen = Long.MAX_VALUE;
+//        c.maxLenLive = Long.MAX_VALUE;
         c.metaRootPos = Long.MAX_VALUE;
         c.block = Long.MAX_VALUE;
         c.len = Integer.MAX_VALUE;
@@ -1333,13 +1315,14 @@ public class MVStore implements AutoCloseable {
         WriteBuffer buff = getWriteBuffer();
         // need to patch the header later
         c.writeChunkHeader(buff, 0);
-        int headerLength = buff.position();
-        c.pageCount = 0;
-        c.pageCountLive = 0;
+        int headerLength = buff.position() + 40;
+        buff.position(headerLength);
+//        c.pageCount = 0;
+//        c.pageCountLive = 0;
         assert c.pagePosToMapId.isEmpty();
         assert c.pagePosToPageId.isEmpty();
-        c.maxLen = 0;
-        c.maxLenLive = 0;
+//        c.maxLen = 0;
+//        c.maxLenLive = 0;
         for (RootReference rootReference : changed) {
             Page p = rootReference.root;
             String key = MVMap.getMapRootKey(p.getMapId());
@@ -1991,9 +1974,6 @@ public class MVStore implements AutoCloseable {
         buff.position(chunkHeaderLen);
         buff.put(readBuff);
         long pos = allocateFileSpace(length, toTheEnd);
-        fileStore.free(start, length);
-        c.block = pos / BLOCK_SIZE;
-        c.next = 0;
         buff.position(0);
         c.writeChunkHeader(buff, chunkHeaderLen);
         buff.position(length - Chunk.FOOTER_LENGTH);
@@ -2001,6 +1981,9 @@ public class MVStore implements AutoCloseable {
         buff.position(0);
         write(pos, buff.getBuffer());
         releaseWriteBuffer(buff);
+        fileStore.free(start, length);
+        c.block = pos / BLOCK_SIZE;
+        c.next = 0;
         meta.put(Chunk.getMetaKey(c.id), c.asString());
         markMetaChanged();
         return true;
@@ -2194,29 +2177,9 @@ public class MVStore implements AutoCloseable {
             MVMap<Object, Object> map = (MVMap<Object, Object>) m;
             if (!map.isClosed()) {
                 rewritedPageCount += map.rewrite(set);
-/*
-                for (Integer chunkId : set) {
-                    Chunk chunk = chunks.get(chunkId);
-                    if (chunk != null) {
-                        for (Integer value : chunk.pagePosToMapId.values()) {
-                            assert value != m.getId() : chunkId + " " + value +  " " + chunk.pagePosToMapId;
-                        }
-                    }
-                }
-*/
             }
         }
         rewritedPageCount += meta.rewrite(set);
-/*
-        for (Integer chunkId : set) {
-            Chunk chunk = chunks.get(chunkId);
-            if (chunk != null) {
-                for (Integer value : chunk.pagePosToMapId.values()) {
-                    assert value != meta.getId() : chunkId + " " + value +  " " + chunk.pagePosToMapId;
-                }
-            }
-        }
-*/
         commit();
         for (Integer chunkId : set) {
             Chunk chunk = chunks.get(chunkId);
@@ -2277,6 +2240,7 @@ public class MVStore implements AutoCloseable {
     }
 
     private boolean accountForRemovedPages(RootReference.RemovalInfoNode removalInfo, final long version) {
+        assert storeLock.isHeldByCurrentThread();
         final Set<Long> removedPos = new HashSet<>();
         final Set<Chunk> modified = new HashSet<>();
         while (removalInfo != null) {
@@ -2296,9 +2260,9 @@ public class MVStore implements AutoCloseable {
 
                     Chunk chunk = chunks.get(chunkId);
                     assert chunk.pagePosToMapId == null || chunk.pageCountLive == chunk.pagePosToMapId.size() :
-                            chunk.pageCountLive + " != " + chunk.pagePosToMapId.size() + " " + chunk + " " + chunk.pagePosToMapId;
+                            "pagePosToMapId: " + pagePos + " " + chunk.pageCountLive + " != " + chunk.pagePosToMapId.size() + " " + chunk + " " + chunk.pagePosToMapId;
                     assert chunk.pagePosToPageId == null || chunk.pageCountLive == chunk.pagePosToPageId.size() :
-                            chunk.pageCountLive + " != " + chunk.pagePosToPageId.size() + " " + chunk + " " + chunk.pagePosToPageId;
+                            "pagePosToPageId: " + pagePos + " " + chunk.pageCountLive + " != " + chunk.pagePosToPageId.size() + " " + chunk + " " + chunk.pagePosToPageId;
                     chunk.maxLenLive -= pageLength;
                     chunk.pageCountLive--;
 
@@ -2314,12 +2278,13 @@ public class MVStore implements AutoCloseable {
                         assert pageId != null : chunk + " " + chunk.pagePosToPageId;
                     }
 
-                    Long pgId = pagesToBeDeleted.remove(pagePos);
-                    if (pgId == null) {
-                        pgId = pageId;
-                    } else if (pageId != null) {
-                        assert pgId.equals(pageId) : pgId + " <> " + pageId;
+                    if (!pagesToBeDeleted.isEmpty()) {
+                        Long pgId = pagesToBeDeleted.remove(pagePos);
+                        assert pgId != null : pagePos + " " + pageId + " " + pagesToBeDeleted;
+                        assert pageId == null || pgId.equals(pageId) : pgId + " <> " + pageId;
+                        assert pagesToBeDeleted.remove(pgId) == pagePos : pagePos + " " + pageId + " " + pagesToBeDeleted;
                     }
+
 
                     assert chunk.pageCountLive >= 0 : chunk;
                     assert chunk.maxLenLive >= 0 : chunk;
@@ -2335,6 +2300,11 @@ public class MVStore implements AutoCloseable {
                     if (chunk.isSaved()) {
                         modified.add(chunk);
                     }
+
+                    assert chunk.pagePosToMapId == null || chunk.pageCountLive == chunk.pagePosToMapId.size() :
+                            "pagePosToMapId: " + pagePos + " " + chunk.pageCountLive + " != " + chunk.pagePosToMapId.size() + " " + chunk + " " + chunk.pagePosToMapId;
+                    assert chunk.pagePosToPageId == null || chunk.pageCountLive == chunk.pagePosToPageId.size() :
+                            "pagePosToPageId: " + pagePos + " " + chunk.pageCountLive + " != " + chunk.pagePosToPageId.size() + " " + chunk + " " + chunk.pagePosToPageId;
                 }
             });
             removalInfo = removalInfo.getNext();

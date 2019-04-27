@@ -413,6 +413,9 @@ public final class DataUtils {
     public static void readFully(FileChannel file, long pos, ByteBuffer dst) {
         try {
             do {
+                if (file == null) {
+                    throw new IOException("Already closed ?");
+                }
                 int len = file.read(dst, pos);
                 if (len < 0) {
                     throw new EOFException();
@@ -423,15 +426,15 @@ public final class DataUtils {
         } catch (IOException e) {
             long size;
             try {
-                size = file.size();
+                size = file == null ? -1 : file.size();
             } catch (IOException e2) {
                 size = -1;
             }
             throw newIllegalStateException(
                     ERROR_READING_FAILED,
-                    "Reading from {0} failed; file length {1} " +
-                    "read length {2} at {3}",
-                    file, size, dst.remaining(), pos, e);
+                    "Reading from file {0} failed at {0} (length {1}), " +
+                    "read {3}, remaining {4}",
+                    file, pos, size, dst.position(), dst.remaining(), e);
         }
     }
 
@@ -444,6 +447,9 @@ public final class DataUtils {
      */
     public static void writeFully(FileChannel file, long pos, ByteBuffer src) {
         try {
+            if (file == null) {
+                throw new IOException("Already closed ?");
+            }
             int off = 0;
             do {
                 int len = file.write(src, pos + off);

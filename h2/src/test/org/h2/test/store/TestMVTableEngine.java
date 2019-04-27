@@ -69,7 +69,7 @@ public class TestMVTableEngine extends TestDb {
         testOldAndNew();
         testTemporaryTables();
         testUniqueIndex();
-//        testSecondaryIndex();
+        testSecondaryIndex();
         testGarbageCollectionForLOB();
         testSpatial();
         testCount();
@@ -620,7 +620,7 @@ public class TestMVTableEngine extends TestDb {
         Connection conn;
         Statement stat;
         deleteDb(getTestName());
-        String url = getTestName() + ";MV_STORE=TRUE";
+        String url = getTestName() + ";MV_STORE=TRUE;WRITE_DELAY=0";
         url = getURL(url, true);
         conn = getConnection(url);
         stat = conn.createStatement();

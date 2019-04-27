@@ -1101,7 +1101,6 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                     store.deregisterMapRoot(id);
                     return null;
                 }
-//                return rootReference;
             }
 
             RootReference previous = rootReference;
@@ -1115,27 +1114,6 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                     rootReference.extractRemovalInfo();
                     rootReference = updatedRootReference;
                 }
-/*
-                if (isPersistent()) {
-                    while (removalInfo != null && store.accountForRemovedPages(removalInfo, writeVersion) && this == store.getMetaMap()) {
-                        attempt = 0;
-                        while(true) {
-                            rootReference = flushAndGetRoot();
-                            if (rootReference.hasRemovalInfo()) {
-                                updatedRootReference = rootReference.updateVersion(updatedRootReference.previous, writeVersion, ++attempt);
-                                if(root.compareAndSet(rootReference, updatedRootReference)) {
-                                    removalInfo = rootReference.extractRemovalInfo();
-                                    break;
-                                }
-                            } else {
-                                removalInfo = null;
-                                updatedRootReference = rootReference;
-                                break;
-                            }
-                        }
-                    }
-                }
-*/
                 removeUnusedOldVersions(updatedRootReference);
                 return rootReference;
             }

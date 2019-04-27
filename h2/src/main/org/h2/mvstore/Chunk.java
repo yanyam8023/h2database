@@ -154,6 +154,33 @@ public class Chunk {
                 "File corrupt reading chunk at position {0}", start);
     }
 
+    ByteBuffer getBufferForPage(long pos, FileStore fileStore) {
+        long filePos = block * MVStore.BLOCK_SIZE;
+        filePos += DataUtils.getPageOffset(pos);
+        if (filePos < 0) {
+            throw DataUtils.newIllegalStateException(
+                    DataUtils.ERROR_FILE_CORRUPT,
+                    "Negative position {0}; p={1}, c={2}", filePos, pos, toString());
+        }
+        long maxPos = (block + len) * MVStore.BLOCK_SIZE;
+
+        ByteBuffer buff;
+        int maxLength = DataUtils.getPageMaxLength(pos);
+        if (maxLength == DataUtils.PAGE_LARGE) {
+            buff = fileStore.readFully(filePos, 128);
+            maxLength = buff.getInt();
+            // read the first bytes again
+        }
+        maxLength = (int) Math.min(maxPos - filePos, maxLength);
+        int length = maxLength;
+        if (length < 0) {
+            throw DataUtils.newIllegalStateException(DataUtils.ERROR_FILE_CORRUPT,
+                    "Illegal page length {0} reading at {1}; max pos {2} ", length, filePos, maxPos);
+        }
+        buff = fileStore.readFully(filePos, length);
+        return buff;
+    }
+
     /**
      * Write the chunk header.
      *
