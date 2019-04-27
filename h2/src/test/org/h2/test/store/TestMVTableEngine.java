@@ -79,7 +79,7 @@ public class TestMVTableEngine extends TestDb {
         testTransactionLogEmptyAfterCommit();
         testShrinkDatabaseFile();
         testTwoPhaseCommit();
-//        testRecover();
+        testRecover();
         testSeparateKey();
         testRollback();
         testRollbackAfterCrash();

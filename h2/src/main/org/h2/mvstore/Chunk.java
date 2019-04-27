@@ -45,7 +45,7 @@ public class Chunk {
     /**
      * The start block number within the file.
      */
-    public long block;
+    public volatile long block;
 
     /**
      * The length in number of blocks.
@@ -152,33 +152,6 @@ public class Chunk {
         throw DataUtils.newIllegalStateException(
                 DataUtils.ERROR_FILE_CORRUPT,
                 "File corrupt reading chunk at position {0}", start);
-    }
-
-    ByteBuffer getBufferForPage(long pos, FileStore fileStore) {
-        long filePos = block * MVStore.BLOCK_SIZE;
-        filePos += DataUtils.getPageOffset(pos);
-        if (filePos < 0) {
-            throw DataUtils.newIllegalStateException(
-                    DataUtils.ERROR_FILE_CORRUPT,
-                    "Negative position {0}; p={1}, c={2}", filePos, pos, toString());
-        }
-        long maxPos = (block + len) * MVStore.BLOCK_SIZE;
-
-        ByteBuffer buff;
-        int maxLength = DataUtils.getPageMaxLength(pos);
-        if (maxLength == DataUtils.PAGE_LARGE) {
-            buff = fileStore.readFully(filePos, 128);
-            maxLength = buff.getInt();
-            // read the first bytes again
-        }
-        maxLength = (int) Math.min(maxPos - filePos, maxLength);
-        int length = maxLength;
-        if (length < 0) {
-            throw DataUtils.newIllegalStateException(DataUtils.ERROR_FILE_CORRUPT,
-                    "Illegal page length {0} reading at {1}; max pos {2} ", length, filePos, maxPos);
-        }
-        buff = fileStore.readFully(filePos, length);
-        return buff;
     }
 
     /**
@@ -315,6 +288,40 @@ public class Chunk {
 
     boolean isSaved() {
         return block != Long.MAX_VALUE;
+    }
+
+    ByteBuffer readBufferForPage(FileStore fileStore, long pos) {
+        while (true) {
+            long originalBlock = block;
+            try {
+                long filePos = originalBlock * MVStore.BLOCK_SIZE;
+                long maxPos = filePos + len * MVStore.BLOCK_SIZE;
+                filePos += DataUtils.getPageOffset(pos);
+                if (filePos < 0) {
+                    throw DataUtils.newIllegalStateException(
+                            DataUtils.ERROR_FILE_CORRUPT,
+                            "Negative position {0}; p={1}, c={2}", filePos, pos, toString());
+                }
+
+                int length = DataUtils.getPageMaxLength(pos);
+                if (length == DataUtils.PAGE_LARGE) {
+                    // read the first bytes to figure out actual lenght
+                    length = fileStore.readFully(filePos, 128).getInt();
+                }
+                length = (int) Math.min(maxPos - filePos, length);
+                if (length < 0) {
+                    throw DataUtils.newIllegalStateException(DataUtils.ERROR_FILE_CORRUPT,
+                            "Illegal page length {0} reading at {1}; max pos {2} ", length, filePos, maxPos);
+                }
+                if (originalBlock == block) {
+                    return fileStore.readFully(filePos, length);
+                }
+            } catch (IllegalStateException ex) {
+                if (originalBlock == block) {
+                    throw ex;
+                }
+            }
+        }
     }
 
     @Override

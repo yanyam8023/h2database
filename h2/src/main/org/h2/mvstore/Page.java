@@ -771,8 +771,10 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
         assert chunk.pagePosToPageId == null || chunk.pagePosToPageId.put(pos, id) == null;
         assert chunk.pagePosToPageId == null || chunk.pagePosToPageId.size() == chunk.pageCountLive;
         ConcurrentHashMap<Long, Long> toBeDeleted = map.getStore().pagesToBeDeleted;
-        assert map.getVersion() > map.getStore().getLastStoredVersion() + 1 || !toBeDeleted.containsKey(id) :
-                map.getVersion() + " > " + (map.getStore().getLastStoredVersion() + 1) + " || " + !toBeDeleted.containsKey(id);
+//        long version = map.getVersion();
+//        long chunkVersion = chunk.version;
+//        assert version > chunkVersion || !toBeDeleted.containsKey(id) :
+//                version + " > " + chunkVersion + " || " + !toBeDeleted.containsKey(id) + " " + map.getId();
         if (toBeDeleted.containsKey(id)) {
             toBeDeleted.put(id, pos);
             toBeDeleted.put(pos, id);

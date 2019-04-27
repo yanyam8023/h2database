@@ -412,10 +412,10 @@ public final class DataUtils {
      */
     public static void readFully(FileChannel file, long pos, ByteBuffer dst) {
         try {
+            if (file == null) {
+                throw new IOException("Already closed ?");
+            }
             do {
-                if (file == null) {
-                    throw new IOException("Already closed ?");
-                }
                 int len = file.read(dst, pos);
                 if (len < 0) {
                     throw new EOFException();
@@ -432,7 +432,7 @@ public final class DataUtils {
             }
             throw newIllegalStateException(
                     ERROR_READING_FAILED,
-                    "Reading from file {0} failed at {0} (length {1}), " +
+                    "Reading from file {0} failed at {1} (length {2}), " +
                     "read {3}, remaining {4}",
                     file, pos, size, dst.position(), dst.remaining(), e);
         }

@@ -1085,7 +1085,7 @@ public class MVStore implements AutoCloseable {
      */
     ByteBuffer readBufferForPage(long pos, int expectedMapId) {
         Chunk c = getChunk(pos);
-        ByteBuffer buff = c.getBufferForPage(pos, fileStore);
+        ByteBuffer buff = c.readBufferForPage(fileStore, pos);
         int chunkId = DataUtils.getPageChunkId(pos);
         int offset = DataUtils.getPageOffset(pos);
         int start = buff.position();
@@ -2240,7 +2240,7 @@ public class MVStore implements AutoCloseable {
     }
 
     private boolean accountForRemovedPages(RootReference.RemovalInfoNode removalInfo, final long version) {
-        assert storeLock.isHeldByCurrentThread();
+//        assert storeLock.isHeldByCurrentThread();
         final Set<Long> removedPos = new HashSet<>();
         final Set<Chunk> modified = new HashSet<>();
         while (removalInfo != null) {
@@ -2254,15 +2254,15 @@ public class MVStore implements AutoCloseable {
                         return;
                     }
                     assert removedPos.add(pagePos) : pagePos;
-                    assert DataUtils.isPageSaved(pagePos);
+//                    assert DataUtils.isPageSaved(pagePos);
                     int chunkId = DataUtils.getPageChunkId(pagePos);
                     int pageLength = DataUtils.getPageMaxLength(pagePos);
 
                     Chunk chunk = chunks.get(chunkId);
+                    assert chunk.pagePosToPageId == null || chunk.pageCountLive == chunk.pagePosToPageId.size() :
+                            "pagePosToPageId: " + pagePos + " " + chunk.pageCountLive + " != " + chunk.pagePosToPageId.size() + " " + chunk + " " + chunk.pagePosToPageId + "\n" + pagesToBeDeleted;
                     assert chunk.pagePosToMapId == null || chunk.pageCountLive == chunk.pagePosToMapId.size() :
                             "pagePosToMapId: " + pagePos + " " + chunk.pageCountLive + " != " + chunk.pagePosToMapId.size() + " " + chunk + " " + chunk.pagePosToMapId;
-                    assert chunk.pagePosToPageId == null || chunk.pageCountLive == chunk.pagePosToPageId.size() :
-                            "pagePosToPageId: " + pagePos + " " + chunk.pageCountLive + " != " + chunk.pagePosToPageId.size() + " " + chunk + " " + chunk.pagePosToPageId;
                     chunk.maxLenLive -= pageLength;
                     chunk.pageCountLive--;
 
@@ -2285,7 +2285,6 @@ public class MVStore implements AutoCloseable {
                         assert pagesToBeDeleted.remove(pgId) == pagePos : pagePos + " " + pageId + " " + pagesToBeDeleted;
                     }
 
-
                     assert chunk.pageCountLive >= 0 : chunk;
                     assert chunk.maxLenLive >= 0 : chunk;
                     assert (chunk.pageCountLive == 0) == (chunk.maxLenLive == 0) : chunk;
@@ -2300,11 +2299,10 @@ public class MVStore implements AutoCloseable {
                     if (chunk.isSaved()) {
                         modified.add(chunk);
                     }
-
+                    assert chunk.pagePosToPageId == null || chunk.pageCountLive == chunk.pagePosToPageId.size() :
+                            "pagePosToPageId: " + pagePos + " " + chunk.pageCountLive + " != " + chunk.pagePosToPageId.size() + " " + chunk + " " + chunk.pagePosToPageId + "\n" + pagesToBeDeleted;
                     assert chunk.pagePosToMapId == null || chunk.pageCountLive == chunk.pagePosToMapId.size() :
                             "pagePosToMapId: " + pagePos + " " + chunk.pageCountLive + " != " + chunk.pagePosToMapId.size() + " " + chunk + " " + chunk.pagePosToMapId;
-                    assert chunk.pagePosToPageId == null || chunk.pageCountLive == chunk.pagePosToPageId.size() :
-                            "pagePosToPageId: " + pagePos + " " + chunk.pageCountLive + " != " + chunk.pagePosToPageId.size() + " " + chunk + " " + chunk.pagePosToPageId;
                 }
             });
             removalInfo = removalInfo.getNext();
