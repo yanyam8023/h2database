@@ -183,7 +183,7 @@ public final class MVRTreeMap<V> extends MVMap<SpatialKey, V> {
 
             if(updateRoot(rootReference, p, attempt, removedInfo)) {
                 if (isPersistent()) {
-                    assert removedPages == null || recordRemovals(removedPages);
+//                    assert removedPages == null || recordRemovals(removedPages);
                     store.registerUnsavedPage(unsavedMemory);
                 }
                 return result;

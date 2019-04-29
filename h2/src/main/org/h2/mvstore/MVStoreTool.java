@@ -185,6 +185,7 @@ public class MVStoreTool {
                     chunk.getShort();
                     int mapId = DataUtils.readVarInt(chunk);
                     int entries = DataUtils.readVarInt(chunk);
+                    DataUtils.readVarLong(chunk);   // page id, ignored
                     int type = chunk.get();
                     boolean compressed = (type & DataUtils.PAGE_COMPRESSED) != 0;
                     boolean node = (type & 1) != 0;

@@ -423,7 +423,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
             rootReference = flushAndGetRoot();
             Page page = rootReference.root;
             rootReference = getUpdatedRoot(rootReference, emptyRootPage, ++attempt, page);
-            assert rootReference == null || recordRemovals(page);
+//            assert rootReference == null || recordRemovals(page);
         } while (rootReference == null);
         return rootReference;
     }
@@ -1286,7 +1286,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                     lockedRootReference = null;
                     if (isPersistent()) {
                         if (tip != null) {
-                            tip.markRemovedPages();
+//                            tip.markRemovedPages();
                         }
                         store.registerUnsavedPage(unsavedMemoryHolder.value);
                     }
@@ -1792,7 +1792,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                     lockedRootReference = null;
                 }
                 if (isPersistent()) {
-                    tip.markRemovedPages();
+//                    tip.markRemovedPages();
                     store.registerUnsavedPage(unsavedMemoryHolder.value);
                 }
                 return result;

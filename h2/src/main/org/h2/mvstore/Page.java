@@ -752,9 +752,6 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
                     DataUtils.ERROR_INTERNAL, "Page already stored");
         }
         pos = DataUtils.getPagePos(chunkId, start, pageLength, type);
-//        if (wasRemovedAt == map.getStore().getLastStoredVersion()+1) {
-//            System.err.println("wasRemovedAt=" + wasRemovedAt +  " id: " + id +" pos: " + pos + " chunk: " + DataUtils.getPageChunkId(pos));
-//        }
         store.cachePage(this);
         if (type == DataUtils.PAGE_TYPE_NODE) {
             // cache again - this will make sure nodes stays in the cache
@@ -771,10 +768,6 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
         assert chunk.pagePosToPageId == null || chunk.pagePosToPageId.put(pos, id) == null;
         assert chunk.pagePosToPageId == null || chunk.pagePosToPageId.size() == chunk.pageCountLive;
         ConcurrentHashMap<Long, Long> toBeDeleted = map.getStore().pagesToBeDeleted;
-//        long version = map.getVersion();
-//        long chunkVersion = chunk.version;
-//        assert version > chunkVersion || !toBeDeleted.containsKey(id) :
-//                version + " > " + chunkVersion + " || " + !toBeDeleted.containsKey(id) + " " + map.getId();
         if (toBeDeleted.containsKey(id)) {
             toBeDeleted.put(id, pos);
             toBeDeleted.put(pos, id);

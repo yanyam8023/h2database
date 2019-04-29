@@ -377,7 +377,7 @@ public class MVStore implements AutoCloseable {
             int kb = Math.max(1, Math.min(19, Utils.scaleForAvailableMemory(64))) * 1024;
             kb = DataUtils.getConfigParam(config, "autoCommitBufferSize", kb);
             autoCommitMemory = kb * 1024;
-            autoCompactFillRate = DataUtils.getConfigParam(config, "autoCompactFillRate", 95);
+            autoCompactFillRate = DataUtils.getConfigParam(config, "autoCompactFillRate", 50);
             char[] encryptionKey = (char[]) config.get("encryptionKey");
             try {
                 if (!fileStoreIsProvided) {
@@ -1779,7 +1779,7 @@ public class MVStore implements AutoCloseable {
     private long measureFileLengthInUse() {
         long size = 2;
         for (Chunk c : chunks.values()) {
-            if (c.len != Integer.MAX_VALUE) {
+            if (c.isSaved()) {
                 size = Math.max(size, c.block + c.len);
             }
         }
@@ -1909,7 +1909,7 @@ public class MVStore implements AutoCloseable {
                 });
         long size = 0;
         for (Chunk chunk : chunks.values()) {
-            if (chunk.block > startBlock) {
+            if (chunk.isSaved() && chunk.block > startBlock) {
                 queue.offer(chunk);
                 size += chunk.len;
                 while (size > moveSize) {
@@ -2266,11 +2266,8 @@ public class MVStore implements AutoCloseable {
                     chunk.maxLenLive -= pageLength;
                     chunk.pageCountLive--;
 
-                    Integer mapId = null;
-                    if (chunk.pagePosToMapId != null) {
-                        mapId = chunk.pagePosToMapId.remove(pagePos);
-                        assert mapId != null : chunk + " " + chunk.pagePosToMapId;
-                    }
+                    assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.remove(pagePos) != null
+                            : chunk + " " + pagePos + " " + chunk.pagePosToMapId;
 
                     Long pageId = null;
                     if (chunk.pagePosToPageId != null) {
@@ -2299,10 +2296,6 @@ public class MVStore implements AutoCloseable {
                     if (chunk.isSaved()) {
                         modified.add(chunk);
                     }
-                    assert chunk.pagePosToPageId == null || chunk.pageCountLive == chunk.pagePosToPageId.size() :
-                            "pagePosToPageId: " + pagePos + " " + chunk.pageCountLive + " != " + chunk.pagePosToPageId.size() + " " + chunk + " " + chunk.pagePosToPageId + "\n" + pagesToBeDeleted;
-                    assert chunk.pagePosToMapId == null || chunk.pageCountLive == chunk.pagePosToMapId.size() :
-                            "pagePosToMapId: " + pagePos + " " + chunk.pageCountLive + " != " + chunk.pagePosToMapId.size() + " " + chunk + " " + chunk.pagePosToMapId;
                 }
             });
             removalInfo = removalInfo.getNext();
@@ -2919,13 +2912,12 @@ public class MVStore implements AutoCloseable {
                 }
             }
         }
-//        if (currentVersion % 100 == 0) {
-//            System.out.println("V." + currentVersion + " of " + System.identityHashCode(this) +
-//                                ": fill rate: " + getFileStore().getFillRate() +
-//                                "%, chunk fill rate: " + getChunksFillRate() +
-//                                "%, file size: " + fileStore.getFileLengthInUse());
-//
-//        }
+        if (currentVersion % 100 == 0) {
+            System.out.println("V." + currentVersion + " of " + System.identityHashCode(this) +
+                                ": fill rate: " + getFileStore().getFillRate() +
+                                "%, chunk fill rate: " + getChunksFillRate() +
+                                "%, file size: " + fileStore.getFileLengthInUse());
+        }
     }
 
     private void handleException(Throwable ex) {

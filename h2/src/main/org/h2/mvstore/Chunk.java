@@ -116,11 +116,13 @@ public class Chunk {
      */
     public long next;
 
-    public Map<Long,Integer> pagePosToMapId = Collections.synchronizedMap(new HashMap<Long,Integer>());
-    public Map<Long,Long> pagePosToPageId = Collections.synchronizedMap(new HashMap<Long,Long>());
+    Map<Long,Integer> pagePosToMapId;
+    Map<Long,Long> pagePosToPageId;
 
     Chunk(int id) {
         this.id = id;
+        assert (pagePosToMapId = Collections.synchronizedMap(new HashMap<Long,Integer>())) != null;
+        assert (pagePosToPageId = Collections.synchronizedMap(new HashMap<Long,Long>())) != null;
     }
 
     /**
@@ -291,6 +293,7 @@ public class Chunk {
     }
 
     ByteBuffer readBufferForPage(FileStore fileStore, long pos) {
+        assert isSaved() : this;
         while (true) {
             long originalBlock = block;
             try {
