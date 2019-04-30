@@ -380,7 +380,7 @@ public class MVTableEngine implements TableEngine {
                     if (compactFully && FileUtils.exists(fileName)) {
                         // the file could have been deleted concurrently,
                         // so only compact if the file still exists
-                        MVStoreTool.compact(fileName, true);
+                        MVStoreTool.compact(fileName, true/*getMvStore().getCompressionLevel() > 0*/);
                     }
                 }
             } catch (IllegalStateException e) {

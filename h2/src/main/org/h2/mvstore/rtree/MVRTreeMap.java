@@ -208,11 +208,14 @@ public final class MVRTreeMap<V> extends MVMap<SpatialKey, V> {
     }
 
     private boolean recordRemovals(Collection<Page> removedPages) {
-        for (Page page : removedPages) {
-            long pagePos = page.getPos();
-            store.pagesToBeDeleted.put(page.id, pagePos);
-            if (DataUtils.isPageSaved(pagePos)) {
-                store.pagesToBeDeleted.put(pagePos, page.id);
+        Map<Long, Long> toBeDeleted = store.pagesToBeDeleted;
+        if (toBeDeleted != null) {
+            for (Page page : removedPages) {
+                long pagePos = page.getPos();
+                toBeDeleted.put(page.id, pagePos);
+                if (DataUtils.isPageSaved(pagePos)) {
+                    toBeDeleted.put(pagePos, page.id);
+                }
             }
         }
         return true;

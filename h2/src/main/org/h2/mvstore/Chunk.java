@@ -121,8 +121,8 @@ public class Chunk {
 
     Chunk(int id) {
         this.id = id;
-        assert (pagePosToMapId = Collections.synchronizedMap(new HashMap<Long,Integer>())) != null;
-        assert (pagePosToPageId = Collections.synchronizedMap(new HashMap<Long,Long>())) != null;
+//        assert (pagePosToMapId = Collections.synchronizedMap(new HashMap<Long,Integer>())) != null;
+//        assert (pagePosToPageId = Collections.synchronizedMap(new HashMap<Long,Long>())) != null;
     }
 
     /**

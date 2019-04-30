@@ -52,13 +52,15 @@ public class CursorPos implements RootReference.VisitablePages
 
     boolean markRemovedPages() {
         ConcurrentHashMap<Long, Long> toBeDeleted = page.map.getStore().pagesToBeDeleted;
-        for (CursorPos head = this; head != null; head = head.parent) {
-            Page page = head.page;
-            if (page.getTotalCount() > 0) {
-                long pagePos = page.getPos();
-                toBeDeleted.put(page.id, pagePos);
-                if (DataUtils.isPageSaved(pagePos)) {
-                    toBeDeleted.put(pagePos, page.id);
+        if (toBeDeleted != null) {
+            for (CursorPos head = this; head != null; head = head.parent) {
+                Page page = head.page;
+                if (page.getTotalCount() > 0) {
+                    long pagePos = page.getPos();
+                    toBeDeleted.put(page.id, pagePos);
+                    if (DataUtils.isPageSaved(pagePos)) {
+                        toBeDeleted.put(pagePos, page.id);
+                    }
                 }
             }
         }
@@ -69,7 +71,7 @@ public class CursorPos implements RootReference.VisitablePages
         int unsavedMemory = 0;
         for (CursorPos head = this; head != null; head = head.parent) {
             Page page = head.page;
-            if (!page.isSaved()) {
+            if (!page.isSaved() && page.getTotalCount() > 0) {
                 unsavedMemory += page.getMemory();
             }
         }

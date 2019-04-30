@@ -317,7 +317,8 @@ public class MVStore implements AutoCloseable {
 
     private long lastTimeAbsolute;
 
-    public final ConcurrentHashMap<Long,Long> pagesToBeDeleted = new ConcurrentHashMap<>();
+//    public final ConcurrentHashMap<Long,Long> pagesToBeDeleted = new ConcurrentHashMap<>();
+    public final ConcurrentHashMap<Long,Long> pagesToBeDeleted = null;
 
 
     /**
@@ -377,7 +378,7 @@ public class MVStore implements AutoCloseable {
             int kb = Math.max(1, Math.min(19, Utils.scaleForAvailableMemory(64))) * 1024;
             kb = DataUtils.getConfigParam(config, "autoCommitBufferSize", kb);
             autoCommitMemory = kb * 1024;
-            autoCompactFillRate = DataUtils.getConfigParam(config, "autoCompactFillRate", 40);
+            autoCompactFillRate = DataUtils.getConfigParam(config, "autoCompactFillRate", 10);
             char[] encryptionKey = (char[]) config.get("encryptionKey");
             try {
                 if (!fileStoreIsProvided) {
@@ -1291,8 +1292,8 @@ public class MVStore implements AutoCloseable {
         buff.position(headerLength);
 //        c.pageCount = 0;
 //        c.pageCountLive = 0;
-        assert c.pagePosToMapId.isEmpty();
-        assert c.pagePosToPageId.isEmpty();
+        assert c.pagePosToMapId == null || c.pagePosToMapId.isEmpty();
+        assert c.pagePosToPageId == null || c.pagePosToPageId.isEmpty();
 //        c.maxLen = 0;
 //        c.maxLenLive = 0;
         for (RootReference rootReference : changed) {
@@ -2173,14 +2174,16 @@ public class MVStore implements AutoCloseable {
                             //                    Page page = Page.read(buff, pagePos, map);
                             Page page = readPage(map, pagePos);
                             //                    assert page.wasRemovedAt != 0 : page;
-                            System.err.println(pagePos + " -> " + page.id + " " + pagesToBeDeleted.get(page.id));
+                            System.err.println(pagePos + " -> " + page.id +
+                                    " " + (pagesToBeDeleted != null ? pagesToBeDeleted.get(page.id) : null) +
+                                    " " + mapId + " " + map.getName());
                         }
                     }
                 }
-                assert pagesToBeDeleted.size() < 0 : chunk +
-                        "\npagePosToMapId:\n" + chunk.pagePosToMapId +
-                        "\npagePosToPageId:\n" + chunk.pagePosToPageId +
-                        "\nchunkIds: " + set + "\npagesToBeDeleted: " + pagesToBeDeleted;
+//                assert pagesToBeDeleted.size() < 0 : chunk +
+//                        "\npagePosToMapId:\n" + chunk.pagePosToMapId +
+//                        "\npagePosToPageId:\n" + chunk.pagePosToPageId +
+//                        "\nchunkIds: " + set + "\npagesToBeDeleted: " + pagesToBeDeleted;
             }
         }
         return rewritedPageCount;
@@ -2251,11 +2254,17 @@ public class MVStore implements AutoCloseable {
                         assert pageId != null : chunk + " " + chunk.pagePosToPageId;
                     }
 
-                    if (!pagesToBeDeleted.isEmpty()) {
+                    if (pagesToBeDeleted != null && !pagesToBeDeleted.isEmpty()) {
                         Long pgId = pagesToBeDeleted.remove(pagePos);
-                        assert pgId != null : pagePos + " " + pageId + " " + pagesToBeDeleted;
+                        if (pgId == null) {
+                            pgId = page != null ? Long.valueOf(page.id) : pageId;
+                        }
                         assert pageId == null || pgId.equals(pageId) : pgId + " <> " + pageId;
-                        assert pagesToBeDeleted.remove(pgId) == pagePos : pagePos + " " + pageId + " " + pagesToBeDeleted;
+                        if (pgId != null) {
+                            Long pos = pagesToBeDeleted.remove(pgId);
+                            assert pos == null || pos == 0 || pos == pagePos :
+                                    pos + " <> " + pagePos + " " + pageId + " " + pagesToBeDeleted;
+                        }
                     }
 
                     assert chunk.pageCountLive >= 0 : chunk;
@@ -2300,7 +2309,7 @@ public class MVStore implements AutoCloseable {
         return compressorHigh;
     }
 
-    int getCompressionLevel() {
+    public int getCompressionLevel() {
         return compressionLevel;
     }
 

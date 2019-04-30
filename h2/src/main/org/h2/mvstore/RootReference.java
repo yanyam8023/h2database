@@ -134,10 +134,6 @@ public final class RootReference
                     version : previous.version;
     }
 
-    boolean hasRemovalInfo() {
-        return removalInfo != null;
-    }
-
     RemovalInfoNode extractRemovalInfo() {
         RemovalInfoNode result = removalInfo;
         removalInfo = null;

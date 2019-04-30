@@ -423,22 +423,43 @@ public class MVMap<K, V> extends AbstractMap<K, V>
             rootReference = flushAndGetRoot();
             Page page = rootReference.root;
             rootReference = getUpdatedRoot(rootReference, emptyRootPage, ++attempt, page);
-            assert rootReference == null || recordRemovals(page);
+            if (rootReference == null) {
+                assert recordRemovals(page);
+                store.registerUnsavedPage(-calculateUnsavedMemoryAjustment(page));
+            }
         } while (rootReference == null);
         return rootReference;
     }
 
     private boolean recordRemovals(Page page) {
+        final Map<Long, Long> toBeDeleted = store.pagesToBeDeleted;
+        if (toBeDeleted != null) {
+            page.visitPages(new Page.Visitor() {
+                @Override
+                public void visit(Page page, long pagePos) {
+                    if (page.getTotalCount() > 0) {
+                        toBeDeleted.put(page.id, pagePos);
+                        if (DataUtils.isPageSaved(pagePos)) {
+                            toBeDeleted.put(pagePos, page.id);
+                        }
+                    }
+                }
+            });
+        }
+        return true;
+    }
+
+    private int calculateUnsavedMemoryAjustment(Page page) {
+        final IntValueHolder unsavedMemoryHolder = new IntValueHolder();
         page.visitPages(new Page.Visitor() {
             @Override
             public void visit(Page page, long pagePos) {
-                store.pagesToBeDeleted.put(page.id, pagePos);
-                if (DataUtils.isPageSaved(pagePos)) {
-                    store.pagesToBeDeleted.put(pagePos, page.id);
+                if (!DataUtils.isPageSaved(pagePos) && page.getTotalCount() > 0) {
+                    unsavedMemoryHolder.value += page.getMemory();
                 }
             }
         });
-        return true;
+        return unsavedMemoryHolder.value;
     }
 
     /**
@@ -1093,7 +1114,6 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         int attempt = 0;
         while(true) {
             RootReference rootReference = flushAndGetRoot();
-            assert rootReference.version <= writeVersion : rootReference.version + " > " + writeVersion;
             if(rootReference.version > writeVersion) {
                 return rootReference;
             } else if (isClosed()) {
@@ -1105,7 +1125,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
 
             RootReference previous = rootReference;
             RootReference tmp;
-            while ((tmp = previous.previous) != null && tmp.root == rootReference.root && !previous.hasRemovalInfo()) {
+            while ((tmp = previous.previous) != null && tmp.root == rootReference.root) {
                 previous = tmp;
             }
             RootReference updatedRootReference = rootReference.updateVersion(previous, writeVersion, ++attempt);
@@ -1174,9 +1194,6 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         if (isPersistent()) {
             store.registerUnsavedPage(target.getMemory());
         }
-//        if (store.isSaveNeeded()) {
-//            store.commit();
-//        }
     }
 
     /**
@@ -1281,7 +1298,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 p = replacePage(pos, p, unsavedMemoryHolder);
 
                 RootReference updatedRootReference = rootReference.updatePageAndLockedStatus(p, remainingBuffer,
-                                                                        lockedForUpdate, tip);
+                                                                        lockedForUpdate, isPersistent() ? tip : null);
                 if (root.compareAndSet(rootReference, updatedRootReference)) {
                     lockedRootReference = null;
                     if (isPersistent()) {
@@ -1782,14 +1799,14 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 }
                 rootPage = replacePage(pos, p, unsavedMemoryHolder);
                 if (lockedRootReference == null) {
-                    if (!updateRoot(rootReference, rootPage, attempt, tip)) {
+                    if (!updateRoot(rootReference, rootPage, attempt, isPersistent() ? tip : null)) {
                         decisionMaker.reset();
                         continue;
                     } else {
                         notifyWaiters();
                     }
                 } else {
-                    unlockRoot(rootPage, tip);
+                    unlockRoot(rootPage, isPersistent() ? tip : null);
                     lockedRootReference = null;
                 }
                 if (isPersistent()) {

@@ -1477,11 +1477,7 @@ Cache 19Mb, reads: 480 expected: 468 size: 193600 cache used: 16 cache hits: 669
         }
         assertEquals(1000, m.size());
         // memory calculations were adjusted, so as this out-of-the-thin-air number
-        assertEquals(93409, s.getUnsavedMemory());
-
-//        assertEquals(93522, s.getUnsavedMemory());
-//        assertEquals(103153, s.getUnsavedMemory());
-//        assertEquals(103329, s.getUnsavedMemory());
+        assertEquals(93635, s.getUnsavedMemory());
         s.commit();
         assertEquals(2, s.getFileStore().getWriteCount());
         s.close();
@@ -1492,8 +1488,7 @@ Cache 19Mb, reads: 480 expected: 468 size: 193600 cache used: 16 cache hits: 669
         assertEquals(0, m.size());
         s.commit();
         // ensure only nodes are read, but not leaves
-//        assertEquals(8, s.getFileStore().getReadCount());
-        assertEquals(49, s.getFileStore().getReadCount());
+        assertEquals(8, s.getFileStore().getReadCount());
         assertTrue(s.getFileStore().getWriteCount() < 5);
         s.close();
     }

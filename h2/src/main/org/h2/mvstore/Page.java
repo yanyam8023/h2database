@@ -768,7 +768,7 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
         assert chunk.pagePosToPageId == null || chunk.pagePosToPageId.put(pos, id) == null;
         assert chunk.pagePosToPageId == null || chunk.pagePosToPageId.size() == chunk.pageCountLive;
         ConcurrentHashMap<Long, Long> toBeDeleted = map.getStore().pagesToBeDeleted;
-        if (toBeDeleted.containsKey(id)) {
+        if (toBeDeleted != null && toBeDeleted.containsKey(id)) {
             toBeDeleted.put(id, pos);
             toBeDeleted.put(pos, id);
         }
@@ -1288,10 +1288,10 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
                 PageReference ref = children[i];
                 long pagePos = ref.getPos();
                 Page page = ref.getPage();
-                if (DataUtils.isLeafPosition(pagePos)) {
-                    if (page == null) {
-                        page = getChildPage(i);
-                    }
+                if (DataUtils.isPageSaved(pagePos) ? DataUtils.isLeafPosition(pagePos) : page.isLeaf()) {
+//                    if (page == null) {
+//                        page = getChildPage(i);
+//                    }
                     visitor.visit(page, pagePos);
                 } else {
                     if (page == null) {
