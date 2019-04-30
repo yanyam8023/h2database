@@ -377,7 +377,7 @@ public class MVStore implements AutoCloseable {
             int kb = Math.max(1, Math.min(19, Utils.scaleForAvailableMemory(64))) * 1024;
             kb = DataUtils.getConfigParam(config, "autoCommitBufferSize", kb);
             autoCommitMemory = kb * 1024;
-            autoCompactFillRate = DataUtils.getConfigParam(config, "autoCompactFillRate", 50);
+            autoCompactFillRate = DataUtils.getConfigParam(config, "autoCompactFillRate", 40);
             char[] encryptionKey = (char[]) config.get("encryptionKey");
             try {
                 if (!fileStoreIsProvided) {
@@ -1084,35 +1084,7 @@ public class MVStore implements AutoCloseable {
      * @return ByteBuffer containing page data.
      */
     ByteBuffer readBufferForPage(long pos, int expectedMapId) {
-        Chunk c = getChunk(pos);
-        ByteBuffer buff = c.readBufferForPage(fileStore, pos);
-        int chunkId = DataUtils.getPageChunkId(pos);
-        int offset = DataUtils.getPageOffset(pos);
-        int start = buff.position();
-        int remaining = buff.remaining();
-        int pageLength = buff.getInt();
-        if (pageLength > remaining || pageLength < 4) {
-            throw DataUtils.newIllegalStateException(DataUtils.ERROR_FILE_CORRUPT,
-                    "File corrupted in chunk {0}, expected page length 4..{1}, got {2}", chunkId, remaining,
-                    pageLength);
-        }
-        buff.limit(start + pageLength);
-
-        short check = buff.getShort();
-        int checkTest = DataUtils.getCheckValue(chunkId)
-                ^ DataUtils.getCheckValue(offset)
-                ^ DataUtils.getCheckValue(pageLength);
-        if (check != (short) checkTest) {
-            throw DataUtils.newIllegalStateException(DataUtils.ERROR_FILE_CORRUPT,
-                    "File corrupted in chunk {0}, expected check value {1}, got {2}", chunkId, checkTest, check);
-        }
-
-        int mapId = DataUtils.readVarInt(buff);
-        if (mapId != expectedMapId) {
-            throw DataUtils.newIllegalStateException(DataUtils.ERROR_FILE_CORRUPT,
-                    "File corrupted in chunk {0}, expected map id {1}, got {2}", chunkId, expectedMapId, mapId);
-        }
-        return buff;
+        return getChunk(pos).readBufferForPage(fileStore, pos, expectedMapId);
     }
 
     /**
@@ -2116,8 +2088,7 @@ public class MVStore implements AutoCloseable {
             return null;
         }
         long time = getTimeSinceCreation();
-        int fillRate = getChunksFillRate();
-        if (fillRate >= targetFillRate) {
+        if (targetFillRate < 100 && getChunksFillRate() >= targetFillRate) {
             return null;
         }
 
@@ -2135,16 +2106,16 @@ public class MVStore implements AutoCloseable {
                 });
 
         long totalSize = 0;
-        Chunk last = chunks.get(lastChunk.id);
+        long latestVersion = lastChunk.version + 1;
         for (Chunk chunk : chunks.values()) {
             // only look at chunk older than the retention time
             // (it's possible to compact chunks earlier, but right
             // now we don't do that)
             int liveCount = chunk.pageCountLive;
             if (liveCount > 0 && liveCount < chunk.pageCount) {
-                if (chunk.time + retentionTime <= time) {
-                    long age = last.version - chunk.version + 1;
-                    chunk.collectPriority = (int) (chunk.getFillRate() * 1000 / Math.max(1,age));
+                if (chunk.isSaved() && chunk.time + retentionTime <= time) {
+                    long age = latestVersion - chunk.version;
+                    chunk.collectPriority = (int) (chunk.getFillRate() * 1000 / age);
                     totalSize += chunk.maxLenLive;
                     queue.offer(chunk);
                     while (totalSize > writeLimit) {
@@ -2172,14 +2143,19 @@ public class MVStore implements AutoCloseable {
         sync();
 
         int rewritedPageCount = 0;
-        for (MVMap<?, ?> m : maps.values()) {
-            @SuppressWarnings("unchecked")
-            MVMap<Object, Object> map = (MVMap<Object, Object>) m;
-            if (!map.isClosed()) {
-                rewritedPageCount += map.rewrite(set);
+        storeLock.unlock();
+        try {
+            for (MVMap<?, ?> m : maps.values()) {
+                @SuppressWarnings("unchecked")
+                MVMap<Object, Object> map = (MVMap<Object, Object>) m;
+                if (!map.isClosed()) {
+                    rewritedPageCount += map.rewrite(set);
+                }
             }
+            rewritedPageCount += meta.rewrite(set);
+        } finally {
+            storeLock.lock();
         }
-        rewritedPageCount += meta.rewrite(set);
         commit();
         for (Integer chunkId : set) {
             Chunk chunk = chunks.get(chunkId);
@@ -2842,7 +2818,7 @@ public class MVStore implements AutoCloseable {
      */
     void writeInBackground() {
         try {
-            if (!isOpenOrStopping()) {
+            if (!isOpenOrStopping() || isReadOnly()) {
                 return;
             }
 
@@ -2882,7 +2858,7 @@ public class MVStore implements AutoCloseable {
                             int writeLimit = autoCommitMemory * autoCompactFillRate / Math.max(chunksFillRate, 1);
                             TxCounter txCounter = registerVersionUsage();
                             try {
-                                Iterable<Chunk> old = findOldChunks(autoCompactFillRate, writeLimit);
+                                Iterable<Chunk> old = findOldChunks(100, writeLimit);
                                 if (old != null) {
                                     HashSet<Integer> idSet = createIdSet(old);
                                     if (!idSet.isEmpty() && compactRewrite(idSet) > 0) {
@@ -2912,12 +2888,12 @@ public class MVStore implements AutoCloseable {
                 }
             }
         }
-        if (currentVersion % 100 == 0) {
-            System.out.println("V." + currentVersion + " of " + System.identityHashCode(this) +
-                                ": fill rate: " + getFileStore().getFillRate() +
-                                "%, chunk fill rate: " + getChunksFillRate() +
-                                "%, file size: " + fileStore.getFileLengthInUse());
-        }
+//        if (currentVersion % 100 == 0) {
+//            System.out.println("V." + currentVersion + " of " + System.identityHashCode(this) +
+//                                ": fill rate: " + getFileStore().getFillRate() +
+//                                "%, chunk fill rate: " + getChunksFillRate() +
+//                                "%, file size: " + fileStore.getFileLengthInUse());
+//        }
     }
 
     private void handleException(Throwable ex) {
@@ -3202,7 +3178,7 @@ public class MVStore implements AutoCloseable {
         // we can not remove chunks here via use of iterator here due to concurrency concerns
         // and use remove() instead
         for (Chunk chunk : chunks.values()) {
-            if (chunk.isSaved() && canOverwriteChunk(chunk, time, oldestVersionToKeep)) {
+            if (canOverwriteChunk(chunk, time, oldestVersionToKeep)) {
                 dropChunk(chunk);
             }
         }
@@ -3213,7 +3189,9 @@ public class MVStore implements AutoCloseable {
             markMetaChanged();
         }
         if (chunks.remove(chunk.id) != null) {
-            freeChunkSpace(chunk);
+            if (chunk.isSaved()) {
+                freeChunkSpace(chunk);
+            }
         }
     }
 

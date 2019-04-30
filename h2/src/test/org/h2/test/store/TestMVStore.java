@@ -1477,9 +1477,8 @@ Cache 19Mb, reads: 480 expected: 468 size: 193600 cache used: 16 cache hits: 669
         }
         assertEquals(1000, m.size());
         // memory calculations were adjusted, so as this out-of-the-thin-air number
-        assertEquals(4669230, s.getUnsavedMemory());
-//        assertEquals(93409, s.getUnsavedMemory());
-        
+        assertEquals(93409, s.getUnsavedMemory());
+
 //        assertEquals(93522, s.getUnsavedMemory());
 //        assertEquals(103153, s.getUnsavedMemory());
 //        assertEquals(103329, s.getUnsavedMemory());

@@ -50,7 +50,7 @@ public class CursorPos implements RootReference.VisitablePages
         }
     }
 
-    void markRemovedPages() {
+    boolean markRemovedPages() {
         ConcurrentHashMap<Long, Long> toBeDeleted = page.map.getStore().pagesToBeDeleted;
         for (CursorPos head = this; head != null; head = head.parent) {
             Page page = head.page;
@@ -62,6 +62,18 @@ public class CursorPos implements RootReference.VisitablePages
                 }
             }
         }
+        return true;
+    }
+
+    int calculateUnsavedMemoryAjustment() {
+        int unsavedMemory = 0;
+        for (CursorPos head = this; head != null; head = head.parent) {
+            Page page = head.page;
+            if (!page.isSaved()) {
+                unsavedMemory += page.getMemory();
+            }
+        }
+        return unsavedMemory;
     }
 
     long[] collectRemovedPagePositions(MVMap.IntValueHolder unsavedMemoryHolder, long version) {

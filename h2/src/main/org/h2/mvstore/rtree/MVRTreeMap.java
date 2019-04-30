@@ -183,7 +183,9 @@ public final class MVRTreeMap<V> extends MVMap<SpatialKey, V> {
 
             if(updateRoot(rootReference, p, attempt, removedInfo)) {
                 if (isPersistent()) {
-//                    assert removedPages == null || recordRemovals(removedPages);
+                    assert removedPages != null;
+                    unsavedMemory -= calculateUnsavedMemoryAjustment(removedPages);
+                    assert recordRemovals(removedPages);
                     store.registerUnsavedPage(unsavedMemory);
                 }
                 return result;
@@ -193,6 +195,16 @@ public final class MVRTreeMap<V> extends MVMap<SpatialKey, V> {
                 removedPages.clear();
             }
         }
+    }
+
+    private int calculateUnsavedMemoryAjustment(Collection<Page> removedPages) {
+        int unsavedMemory = 0;
+        for (Page page : removedPages) {
+            if (!page.isSaved()) {
+                unsavedMemory += page.getMemory();
+            }
+        }
+        return unsavedMemory;
     }
 
     private boolean recordRemovals(Collection<Page> removedPages) {

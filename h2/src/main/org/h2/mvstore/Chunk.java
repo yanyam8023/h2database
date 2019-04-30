@@ -292,7 +292,7 @@ public class Chunk {
         return block != Long.MAX_VALUE;
     }
 
-    ByteBuffer readBufferForPage(FileStore fileStore, long pos) {
+    ByteBuffer readBufferForPage(FileStore fileStore, long pos, int expectedMapId) {
         assert isSaved() : this;
         while (true) {
             long originalBlock = block;
@@ -316,8 +316,37 @@ public class Chunk {
                     throw DataUtils.newIllegalStateException(DataUtils.ERROR_FILE_CORRUPT,
                             "Illegal page length {0} reading at {1}; max pos {2} ", length, filePos, maxPos);
                 }
+
+                ByteBuffer buff = fileStore.readFully(filePos, length);
+
+                int offset = DataUtils.getPageOffset(pos);
+                int start = buff.position();
+                int remaining = buff.remaining();
+                int pageLength = buff.getInt();
+                if (pageLength > remaining || pageLength < 4) {
+                    throw DataUtils.newIllegalStateException(DataUtils.ERROR_FILE_CORRUPT,
+                            "File corrupted in chunk {0}, expected page length 4..{1}, got {2}", id, remaining,
+                            pageLength);
+                }
+                buff.limit(start + pageLength);
+
+                short check = buff.getShort();
+                int checkTest = DataUtils.getCheckValue(id)
+                        ^ DataUtils.getCheckValue(offset)
+                        ^ DataUtils.getCheckValue(pageLength);
+                if (check != (short) checkTest) {
+                    throw DataUtils.newIllegalStateException(DataUtils.ERROR_FILE_CORRUPT,
+                            "File corrupted in chunk {0}, expected check value {1}, got {2}", id, checkTest, check);
+                }
+
+                int mapId = DataUtils.readVarInt(buff);
+                if (mapId != expectedMapId) {
+                    throw DataUtils.newIllegalStateException(DataUtils.ERROR_FILE_CORRUPT,
+                            "File corrupted in chunk {0}, expected map id {1}, got {2}", id, expectedMapId, mapId);
+                }
+
                 if (originalBlock == block) {
-                    return fileStore.readFully(filePos, length);
+                    return buff;
                 }
             } catch (IllegalStateException ex) {
                 if (originalBlock == block) {

@@ -423,7 +423,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
             rootReference = flushAndGetRoot();
             Page page = rootReference.root;
             rootReference = getUpdatedRoot(rootReference, emptyRootPage, ++attempt, page);
-//            assert rootReference == null || recordRemovals(page);
+            assert rootReference == null || recordRemovals(page);
         } while (rootReference == null);
         return rootReference;
     }
@@ -1146,7 +1146,6 @@ public class MVMap<K, V> extends AbstractMap<K, V>
     final void copyFrom(MVMap<K, V> sourceMap) {
         MVStore.TxCounter txCounter = store.registerVersionUsage();
         try {
-            beforeWrite();
             copy(sourceMap.getRootPage(), null, 0);
         } finally {
             store.deregisterVersionUsage(txCounter);
@@ -1154,6 +1153,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
     }
 
     private void copy(Page source, Page parent, int index) {
+        beforeWrite();
         Page target = source.copy(this);
         if (parent == null) {
             setInitialRoot(target, INITIAL_VERSION);
@@ -1174,9 +1174,9 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         if (isPersistent()) {
             store.registerUnsavedPage(target.getMemory());
         }
-        if (store.isSaveNeeded()) {
-            store.commit();
-        }
+//        if (store.isSaveNeeded()) {
+//            store.commit();
+//        }
     }
 
     /**
@@ -1286,7 +1286,8 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                     lockedRootReference = null;
                     if (isPersistent()) {
                         if (tip != null) {
-//                            tip.markRemovedPages();
+                            unsavedMemoryHolder.value -= tip.calculateUnsavedMemoryAjustment();
+                            assert tip.markRemovedPages();
                         }
                         store.registerUnsavedPage(unsavedMemoryHolder.value);
                     }
@@ -1792,7 +1793,8 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                     lockedRootReference = null;
                 }
                 if (isPersistent()) {
-//                    tip.markRemovedPages();
+                    unsavedMemoryHolder.value -= tip.calculateUnsavedMemoryAjustment();
+                    assert tip.markRemovedPages();
                     store.registerUnsavedPage(unsavedMemoryHolder.value);
                 }
                 return result;
