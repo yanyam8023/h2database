@@ -40,7 +40,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
     /**
      * Reference to the current root page.
      */
-     final AtomicReference<RootReference> root;
+    private final AtomicReference<RootReference> root;
 
     private final int id;
     private final long createVersion;
@@ -424,32 +424,13 @@ public class MVMap<K, V> extends AbstractMap<K, V>
             Page page = rootReference.root;
             rootReference = getUpdatedRoot(rootReference, emptyRootPage, ++attempt, page);
             if (rootReference == null) {
-                assert recordRemovals(page);
-                store.registerUnsavedPage(-calculateUnsavedMemoryAjustment(page));
+                store.registerUnsavedPage(-calculateUnsavedMemoryAdjustment(page));
             }
         } while (rootReference == null);
         return rootReference;
     }
 
-    private boolean recordRemovals(Page page) {
-        final Map<Long, Long> toBeDeleted = store.pagesToBeDeleted;
-        if (toBeDeleted != null) {
-            page.visitPages(new Page.Visitor() {
-                @Override
-                public void visit(Page page, long pagePos) {
-                    if (page.getTotalCount() > 0) {
-                        toBeDeleted.put(page.id, pagePos);
-                        if (DataUtils.isPageSaved(pagePos)) {
-                            toBeDeleted.put(pagePos, page.id);
-                        }
-                    }
-                }
-            });
-        }
-        return true;
-    }
-
-    private int calculateUnsavedMemoryAjustment(Page page) {
+    private int calculateUnsavedMemoryAdjustment(Page page) {
         final IntValueHolder unsavedMemoryHolder = new IntValueHolder();
         page.visitPages(new Page.Visitor() {
             @Override
@@ -626,6 +607,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
      * Re-write any pages that belong to one of the chunks in the given set.
      *
      * @param set the set of chunk ids
+     * @return number of pages actually re-written
      */
     final int rewrite(Set<Integer> set) {
         return rewrite(getRootPage(), set);
@@ -1303,8 +1285,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                     lockedRootReference = null;
                     if (isPersistent()) {
                         if (tip != null) {
-                            unsavedMemoryHolder.value -= tip.calculateUnsavedMemoryAjustment();
-                            assert tip.markRemovedPages();
+                            unsavedMemoryHolder.value -= tip.calculateUnsavedMemoryAdjustment();
                         }
                         store.registerUnsavedPage(unsavedMemoryHolder.value);
                     }
@@ -1810,8 +1791,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                     lockedRootReference = null;
                 }
                 if (isPersistent()) {
-                    unsavedMemoryHolder.value -= tip.calculateUnsavedMemoryAjustment();
-                    assert tip.markRemovedPages();
+                    unsavedMemoryHolder.value -= tip.calculateUnsavedMemoryAdjustment();
                     store.registerUnsavedPage(unsavedMemoryHolder.value);
                 }
                 return result;

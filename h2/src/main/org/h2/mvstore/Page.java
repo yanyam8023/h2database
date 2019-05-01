@@ -13,7 +13,6 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -763,15 +762,6 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
         chunk.maxLenLive += max;
         chunk.pageCount++;
         chunk.pageCountLive++;
-        assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.put(pos, getMapId()) == null;
-        assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.size() == chunk.pageCountLive;
-        assert chunk.pagePosToPageId == null || chunk.pagePosToPageId.put(pos, id) == null;
-        assert chunk.pagePosToPageId == null || chunk.pagePosToPageId.size() == chunk.pageCountLive;
-        ConcurrentHashMap<Long, Long> toBeDeleted = map.getStore().pagesToBeDeleted;
-        if (toBeDeleted != null && toBeDeleted.containsKey(id)) {
-            toBeDeleted.put(id, pos);
-            toBeDeleted.put(pos, id);
-        }
         diskSpaceUsed = max != DataUtils.PAGE_LARGE ? max : pageLength;
         return typePos + 1;
     }
@@ -1289,9 +1279,6 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
                 long pagePos = ref.getPos();
                 Page page = ref.getPage();
                 if (DataUtils.isPageSaved(pagePos) ? DataUtils.isLeafPosition(pagePos) : page.isLeaf()) {
-//                    if (page == null) {
-//                        page = getChildPage(i);
-//                    }
                     visitor.visit(page, pagePos);
                 } else {
                     if (page == null) {

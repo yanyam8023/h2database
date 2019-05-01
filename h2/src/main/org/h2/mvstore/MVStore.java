@@ -317,10 +317,6 @@ public class MVStore implements AutoCloseable {
 
     private long lastTimeAbsolute;
 
-//    public final ConcurrentHashMap<Long,Long> pagesToBeDeleted = new ConcurrentHashMap<>();
-    public final ConcurrentHashMap<Long,Long> pagesToBeDeleted = null;
-
-
     /**
      * Create and open the store.
      *
@@ -1292,8 +1288,6 @@ public class MVStore implements AutoCloseable {
         buff.position(headerLength);
 //        c.pageCount = 0;
 //        c.pageCountLive = 0;
-        assert c.pagePosToMapId == null || c.pagePosToMapId.isEmpty();
-        assert c.pagePosToPageId == null || c.pagePosToPageId.isEmpty();
 //        c.maxLen = 0;
 //        c.maxLenLive = 0;
         for (RootReference rootReference : changed) {
@@ -2158,35 +2152,16 @@ public class MVStore implements AutoCloseable {
             storeLock.lock();
         }
         commit();
+        assert validateRewrite(set);
+        return rewritedPageCount;
+    }
+
+    private boolean validateRewrite(Set<Integer> set) {
         for (Integer chunkId : set) {
             Chunk chunk = chunks.get(chunkId);
-//            assert chunk == null || chunk.pageCountLive == 0;
-            if (chunk != null && chunk.pageCountLive != 0) {
-                if (chunk.pagePosToMapId != null) {
-                    assert chunk.pageCountLive == chunk.pagePosToMapId.size();
-                    for (Map.Entry<Long, Integer> entry : chunk.pagePosToMapId.entrySet()) {
-                        long pagePos = entry.getKey();
-                        int mapId = entry.getValue();
-                        MVMap<?, ?> map = mapId == 0 ? meta : getMap(mapId);
-                        if (map != null) {
-//                            assert map != null : mapId;
-                            //                    ByteBuffer buff = readBufferForPage(pagePos, map.getId());
-                            //                    Page page = Page.read(buff, pagePos, map);
-                            Page page = readPage(map, pagePos);
-                            //                    assert page.wasRemovedAt != 0 : page;
-                            System.err.println(pagePos + " -> " + page.id +
-                                    " " + (pagesToBeDeleted != null ? pagesToBeDeleted.get(page.id) : null) +
-                                    " " + mapId + " " + map.getName());
-                        }
-                    }
-                }
-//                assert pagesToBeDeleted.size() < 0 : chunk +
-//                        "\npagePosToMapId:\n" + chunk.pagePosToMapId +
-//                        "\npagePosToPageId:\n" + chunk.pagePosToPageId +
-//                        "\nchunkIds: " + set + "\npagesToBeDeleted: " + pagesToBeDeleted;
-            }
+            assert chunk == null || chunk.pageCountLive == 0;
         }
-        return rewritedPageCount;
+        return true;
     }
 
     private HashSet<Integer> createIdSet(Iterable<Chunk> toCompact) {
@@ -2219,8 +2194,6 @@ public class MVStore implements AutoCloseable {
     }
 
     private boolean accountForRemovedPages(RootReference.RemovalInfoNode removalInfo, final long version) {
-//        assert storeLock.isHeldByCurrentThread();
-        final Set<Long> removedPos = new HashSet<>();
         final Set<Chunk> modified = new HashSet<>();
         while (removalInfo != null) {
             RootReference.VisitablePages pages = removalInfo.data;
@@ -2232,40 +2205,12 @@ public class MVStore implements AutoCloseable {
                     if (!DataUtils.isPageSaved(pagePos) || DataUtils.getPageChunkId(pagePos) > version) {
                         return;
                     }
-                    assert removedPos.add(pagePos) : pagePos;
-//                    assert DataUtils.isPageSaved(pagePos);
                     int chunkId = DataUtils.getPageChunkId(pagePos);
                     int pageLength = DataUtils.getPageMaxLength(pagePos);
 
                     Chunk chunk = chunks.get(chunkId);
-                    assert chunk.pagePosToPageId == null || chunk.pageCountLive == chunk.pagePosToPageId.size() :
-                            "pagePosToPageId: " + pagePos + " " + chunk.pageCountLive + " != " + chunk.pagePosToPageId.size() + " " + chunk + " " + chunk.pagePosToPageId + "\n" + pagesToBeDeleted;
-                    assert chunk.pagePosToMapId == null || chunk.pageCountLive == chunk.pagePosToMapId.size() :
-                            "pagePosToMapId: " + pagePos + " " + chunk.pageCountLive + " != " + chunk.pagePosToMapId.size() + " " + chunk + " " + chunk.pagePosToMapId;
                     chunk.maxLenLive -= pageLength;
                     chunk.pageCountLive--;
-
-                    assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.remove(pagePos) != null
-                            : chunk + " " + pagePos + " " + chunk.pagePosToMapId;
-
-                    Long pageId = null;
-                    if (chunk.pagePosToPageId != null) {
-                        pageId = chunk.pagePosToPageId.remove(pagePos);
-                        assert pageId != null : chunk + " " + chunk.pagePosToPageId;
-                    }
-
-                    if (pagesToBeDeleted != null && !pagesToBeDeleted.isEmpty()) {
-                        Long pgId = pagesToBeDeleted.remove(pagePos);
-                        if (pgId == null) {
-                            pgId = page != null ? Long.valueOf(page.id) : pageId;
-                        }
-                        assert pageId == null || pgId.equals(pageId) : pgId + " <> " + pageId;
-                        if (pgId != null) {
-                            Long pos = pagesToBeDeleted.remove(pgId);
-                            assert pos == null || pos == 0 || pos == pagePos :
-                                    pos + " <> " + pagePos + " " + pageId + " " + pagesToBeDeleted;
-                        }
-                    }
 
                     assert chunk.pageCountLive >= 0 : chunk;
                     assert chunk.maxLenLive >= 0 : chunk;

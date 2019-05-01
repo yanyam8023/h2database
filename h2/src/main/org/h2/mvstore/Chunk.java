@@ -7,7 +7,6 @@ package org.h2.mvstore;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -116,13 +115,8 @@ public class Chunk {
      */
     public long next;
 
-    Map<Long,Integer> pagePosToMapId;
-    Map<Long,Long> pagePosToPageId;
-
     Chunk(int id) {
         this.id = id;
-//        assert (pagePosToMapId = Collections.synchronizedMap(new HashMap<Long,Integer>())) != null;
-//        assert (pagePosToPageId = Collections.synchronizedMap(new HashMap<Long,Long>())) != null;
     }
 
     /**
@@ -209,8 +203,6 @@ public class Chunk {
         c.unusedAtVersion = DataUtils.readHexLong(map, "unusedAtVersion", 0);
         c.version = DataUtils.readHexLong(map, "version", id);
         c.next = DataUtils.readHexLong(map, "next", 0);
-        c.pagePosToMapId = null;
-        c.pagePosToPageId = null;
         return c;
     }
 

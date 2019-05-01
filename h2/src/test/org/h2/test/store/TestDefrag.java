@@ -27,7 +27,14 @@ public class TestDefrag  extends TestDb
      * @param a ignored
      */
     public static void main(String... a) throws Exception {
-        TestBase.createCaller().init().test();
+        org.h2.test.TestAll config = new org.h2.test.TestAll();
+        config.traceTest = true;
+        System.out.println(config);
+        TestBase test = createCaller().init(config);
+        test.config.beforeTest();
+        test.test();
+        test.config.afterTest();
+//        TestBase.createCaller().init().test();
     }
 
     @Override
