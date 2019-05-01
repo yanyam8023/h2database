@@ -217,7 +217,7 @@ public class MVStore implements AutoCloseable {
     /**
      * The map of chunks.
      */
-    public final ConcurrentHashMap<Integer, Chunk> chunks =
+    private final ConcurrentHashMap<Integer, Chunk> chunks =
             new ConcurrentHashMap<>();
 
     private long updateCounter = 0;

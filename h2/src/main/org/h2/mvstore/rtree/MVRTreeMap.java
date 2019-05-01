@@ -139,7 +139,6 @@ public final class MVRTreeMap<V> extends MVMap<SpatialKey, V> {
             ++attempt;
             RootReference rootReference = flushAndGetRoot();
             Page p = rootReference.root;
-//            long version = rootReference.version;
             if (removedPages != null && p.getTotalCount() > 0) {
                 removedPages.add(p);
             }

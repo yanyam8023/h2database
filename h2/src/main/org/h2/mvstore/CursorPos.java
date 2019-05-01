@@ -5,8 +5,6 @@
  */
 package org.h2.mvstore;
 
-import java.util.concurrent.ConcurrentHashMap;
-
 /**
  * A position in a cursor.
  * Instance represents a node in the linked list, which traces path

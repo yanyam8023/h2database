@@ -8,7 +8,6 @@ package org.h2.mvstore;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
-import java.util.Map;
 
 /**
  * A chunk of data, containing one or multiple pages.
