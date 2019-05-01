@@ -1034,7 +1034,7 @@ public class MVStore implements AutoCloseable {
                                     }
                                 }
                                 commit();
-//                                doMaintance();
+                                doMaintance();
                                 shrinkFileIfPossible(0);
                                 assert validateFileLength("on close");
 //                                System.out.println("On close of " + System.identityHashCode(this) +
@@ -1180,7 +1180,7 @@ public class MVStore implements AutoCloseable {
 
     private void store() {
         try {
-            if (isOpenOrStopping() && hasUnsavedChangesInternal()) {
+            if (isOpenOrStopping() && hasUnsavedChanges()) {
                 currentStoreVersion = currentVersion;
                 if (fileStore == null) {
                     lastStoredVersion = currentVersion;
@@ -1270,7 +1270,6 @@ public class MVStore implements AutoCloseable {
             } else if (map.getCreateVersion() <= storeVersion && // if map was created after storing started, skip it
                     !map.isVolatile() &&
                     map.hasChangesSince(lastStoredVersion)) {
-//                assert rootReference.version <= version : rootReference.version + " > " + version;
                 Page rootPage = rootReference.root;
                 if (!rootPage.isSaved() ||
                         // after deletion previously saved leaf
@@ -1310,12 +1309,9 @@ public class MVStore implements AutoCloseable {
         do {
             RootReference metaRootReference = meta.setWriteVersion(version, false);
             assert metaRootReference != null;
-//            assert metaRootReference.version == version : metaRootReference.version + " != " + version;
-
             metaChanged = false;
             metaRoot = metaRootReference.root;
             metaRoot.writeUnsavedRecursive(c, buff);
-
             removalInfo = metaRootReference.extractRemovalInfo();
         } while(meta.isPersistent() && removalInfo != null && accountForRemovedPages(removalInfo, version) && ++cnt > 0);
 
@@ -1399,8 +1395,7 @@ public class MVStore implements AutoCloseable {
             shrinkFileIfPossible(1);
         }
         for (RootReference rootReference : changed) {
-            Page p = rootReference.root;
-            p.writeEnd();
+            rootReference.root.writeEnd();
         }
         metaRoot.writeEnd();
 
@@ -1772,13 +1767,6 @@ public class MVStore implements AutoCloseable {
         return false;
     }
 
-    private boolean hasUnsavedChangesInternal() {
-//        if (meta.hasChangesSince(lastStoredVersion)) {
-//            return true;
-//        }
-        return hasUnsavedChanges();
-    }
-
     private Chunk readChunkHeader(long block) {
         long p = block * BLOCK_SIZE;
         ByteBuffer buff = fileStore.readFully(p, Chunk.MAX_HEADER_LENGTH);
@@ -2062,15 +2050,15 @@ public class MVStore implements AutoCloseable {
         for (Chunk c : chunks.values()) {
             assert c.maxLen >= 0;
             maxLengthSum += c.maxLen;
-//            if (c.time + retentionTime > time) {
+            if (c.time + retentionTime > time) {
                 // young chunks (we don't optimize those):
                 // assume if they are fully live
                 // so that we don't try to optimize yet
                 // until they get old
-//                maxLengthLiveSum += c.maxLen;
-//            } else {
+                maxLengthLiveSum += c.maxLen;
+            } else {
                 maxLengthLiveSum += c.maxLenLive;
-//            }
+            }
         }
         // the fill rate of all chunks combined
         int fillRate = (int) (100 * maxLengthLiveSum / maxLengthSum);
