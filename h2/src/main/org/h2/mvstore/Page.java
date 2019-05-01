@@ -176,7 +176,7 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
      * @param memory the memory used in bytes
      * @return the page
      */
-    public static Page createLeaf(MVMap<?, ?> map, Object[] keys, Object[] values, int memory) {
+    static Page createLeaf(MVMap<?, ?> map, Object[] keys, Object[] values, int memory) {
         assert keys != null;
         Page page = new Leaf(map, keys, values);
         page.initMemoryAccount(memory);
@@ -400,7 +400,7 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
      * @param buff append buffer
      */
     protected void dump(StringBuilder buff) {
-        buff.append(System.identityHashCode(this)).append('\n');
+        buff.append("id: ").append(System.identityHashCode(this)).append('\n');
         buff.append("pos: ").append(Long.toHexString(pos)).append('\n');
         if (isSaved()) {
             int chunkId = DataUtils.getPageChunkId(pos);
@@ -884,17 +884,6 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
     public abstract CursorPos getAppendCursorPos(CursorPos cursorPos);
 
     /**
-     * Remove all page data recursively.
-     */
-//    public abstract void removeAllRecursive();
-
-    public void visitPages(Visitor visitor) {
-        if (getTotalCount() > 0) {
-            visitor.visit(this, pos);
-        }
-    }
-
-    /**
      * Create array for keys storage.
      *
      * @param size number of entries
@@ -914,6 +903,16 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
     final Object[] createValueStorage(int size)
     {
         return new Object[size];
+    }
+
+    /**
+     * Arrange for a specified visitor to visit every page in a subtree rooted at this page.
+     * @param visitor to visit pages
+     */
+    public void visitPages(Visitor visitor) {
+        if (getTotalCount() > 0) {
+            visitor.visit(this, pos);
+        }
     }
 
     public interface Visitor {
@@ -1119,7 +1118,7 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
             return check;
         }
 
-        protected void recalculateTotalCount() {
+        void recalculateTotalCount() {
             totalCount = calculateTotalCount();
         }
 
@@ -1271,7 +1270,7 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
                 PageReference ref = children[i];
                 long pagePos = ref.getPos();
                 Page page = ref.getPage();
-                if (DataUtils.isPageSaved(pagePos) ? DataUtils.isLeafPosition(pagePos) : page.isLeaf()) {
+                if (page == null ? DataUtils.isLeafPosition(pagePos) : page.isLeaf()) {
                     visitor.visit(page, pagePos);
                 } else {
                     if (page == null) {

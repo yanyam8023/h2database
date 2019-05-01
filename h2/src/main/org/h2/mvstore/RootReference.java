@@ -42,7 +42,7 @@ public final class RootReference
     /**
      * Size of the occupied part of the append buffer.
      */
-    final byte appendCounter;
+    private final byte appendCounter;
 
     /**
      * Head of the linked list of RootReference.VisitablePages
@@ -154,35 +154,21 @@ public final class RootReference
     }
 
     public  interface VisitablePages {
-//        int getPageCount();
+        /**
+         * Arrange for a specified visitor to visit every page in a subtree rooted at this page.
+         * @param visitor to visit pages
+         */
         void visitPages(Page.Visitor visitor);
     }
 
-    static class ListNode<T>
+    static class RemovalInfoNode
     {
-        public final T data;
-        public final ListNode<T> next;
+        public final VisitablePages data;
+        public final RemovalInfoNode next;
 
-        public ListNode(T data, ListNode<T> next) {
+        RemovalInfoNode(VisitablePages data, RemovalInfoNode next) {
             this.data = data;
             this.next = next;
-        }
-
-        public <S extends ListNode<T>> S getNext() {
-            return (S)next;
-        }
-    }
-
-    static class RemovalInfoNode extends ListNode<VisitablePages>
-    {
-
-        public RemovalInfoNode(VisitablePages data, ListNode<VisitablePages> next) {
-            super(data, next);
-        }
-
-        @Override
-        public RemovalInfoNode getNext() {
-            return super.getNext();
         }
     }
 }

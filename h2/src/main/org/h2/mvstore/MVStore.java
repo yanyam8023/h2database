@@ -2228,7 +2228,7 @@ public class MVStore implements AutoCloseable {
                     }
                 }
             });
-            removalInfo = removalInfo.getNext();
+            removalInfo = removalInfo.next;
         }
         if (!modified.isEmpty()) {
             for (Chunk chunk : modified) {
@@ -2679,22 +2679,11 @@ public class MVStore implements AutoCloseable {
     }
 
     /**
-     * Remove a map. Please note rolling back this operation does not restore
-     * the data; if you need this ability, use Map.clear().
+     * Remove a map from the current version of the store.
      *
      * @param map the map to remove
      */
     public void removeMap(MVMap<?, ?> map) {
-        removeMap(map, true);
-    }
-
-    /**
-     * Remove a map.
-     *
-     * @param map the map to remove
-     * @param delayed whether to delay deleting the metadata
-     */
-    public void removeMap(MVMap<?, ?> map, boolean delayed) {
         storeLock.lock();
         try {
             checkOpen();
@@ -2702,10 +2691,6 @@ public class MVStore implements AutoCloseable {
                     "Removing the meta map is not allowed");
             map.close();
             RootReference rootReference = map.clearIt();
-//            RootReference.RemovalInfoNode removalInfo = rootReference.extractRemovalInfo();
-//            if (map.isPersistent() && removalInfo != null) {
-//                accountForRemovedPages(removalInfo, currentVersion);
-//            }
 
             updateCounter += rootReference.updateCounter;
             updateAttemptCounter += rootReference.updateAttemptCounter;
@@ -2717,10 +2702,6 @@ public class MVStore implements AutoCloseable {
             }
             if (meta.remove("name." + name) != null) {
                 markMetaChanged();
-            }
-            if (!delayed) {
-                deregisterMapRoot(id);
-                maps.remove(id);
             }
         } finally {
             storeLock.unlock();
@@ -2745,7 +2726,7 @@ public class MVStore implements AutoCloseable {
             if (map == null) {
                 map = openMap(name);
             }
-            removeMap(map, false);
+            removeMap(map);
         }
     }
 
