@@ -374,7 +374,7 @@ public class MVStore implements AutoCloseable {
             int kb = Math.max(1, Math.min(19, Utils.scaleForAvailableMemory(64))) * 1024;
             kb = DataUtils.getConfigParam(config, "autoCommitBufferSize", kb);
             autoCommitMemory = kb * 1024;
-            autoCompactFillRate = DataUtils.getConfigParam(config, "autoCompactFillRate", 10);
+            autoCompactFillRate = DataUtils.getConfigParam(config, "autoCompactFillRate", 40);
             char[] encryptionKey = (char[]) config.get("encryptionKey");
             try {
                 if (!fileStoreIsProvided) {
@@ -1401,9 +1401,8 @@ public class MVStore implements AutoCloseable {
 
         // some pages might have been changed in the meantime (in the newest
         // version)
-        unsavedMemory = Math.max(0, unsavedMemory
-                - currentUnsavedPageCount);
-
+        saveNeeded = false;
+        unsavedMemory = Math.max(0, unsavedMemory - currentUnsavedPageCount);
         lastStoredVersion = storeVersion;
     }
 
@@ -1894,7 +1893,7 @@ public class MVStore implements AutoCloseable {
         commit();
         sync();
 
-        Chunk chunk = this.lastChunk;
+        Chunk chunk = lastChunk;
 
         // now re-use the empty space
         reuseSpace = true;
@@ -2764,10 +2763,19 @@ public class MVStore implements AutoCloseable {
 
     private void doMaintance() {
         if (autoCompactFillRate > 0 && lastChunk != null && reuseSpace) {
-            int fillRate = fileStore.getFillRate();
-            int chunksFillRate = getChunksFillRate();
-            int effectiveFillRate = fillRate * chunksFillRate / 100;
-            if (effectiveFillRate < autoCompactFillRate) {
+            int thresholdRate = autoCompactFillRate;
+            // use a lower fill rate if there were any file operations since the last time
+            long fileOpCount = fileStore.getWriteCount() + fileStore.getReadCount();
+            if (autoCompactLastFileOpCount != fileOpCount) {
+                thresholdRate /= 3;
+            }
+            while (true) {
+                int fillRate = fileStore.getFillRate();
+                int chunksFillRate = getChunksFillRate();
+                int effectiveFillRate = fillRate * chunksFillRate / 100;
+                if (effectiveFillRate > thresholdRate) {
+                    break;
+                }
                 storeLock.lock();
                 try {
                     int oldRetentionTime = retentionTime;
@@ -2778,7 +2786,7 @@ public class MVStore implements AutoCloseable {
                         fillRate = fileStore.getFillRate();
                         chunksFillRate = getChunksFillRate();
                         if ((100 - chunksFillRate) > 2 * (100 - fillRate)) {
-                            int writeLimit = autoCommitMemory * autoCompactFillRate / Math.max(chunksFillRate, 1);
+                            int writeLimit = autoCommitMemory * thresholdRate / Math.max(chunksFillRate, 1);
                             TxCounter txCounter = registerVersionUsage();
                             try {
                                 Iterable<Chunk> old = findOldChunks(100, writeLimit);
@@ -2800,7 +2808,7 @@ public class MVStore implements AutoCloseable {
                     }
 
                     if (fillRate < autoCompactFillRate) {
-                        int writeLimit = autoCommitMemory * autoCompactFillRate / fillRate;
+                        int writeLimit = autoCommitMemory * thresholdRate / Math.max(fillRate, 1);
                         long start = fileStore.getFirstFree() / BLOCK_SIZE;
                         long maxBlocksToMove = writeLimit / BLOCK_SIZE;
                         Iterable<Chunk> move = findChunksToMove(start, maxBlocksToMove);
@@ -2810,6 +2818,7 @@ public class MVStore implements AutoCloseable {
                     storeLock.unlock();
                 }
             }
+            autoCompactLastFileOpCount = fileStore.getWriteCount() + fileStore.getReadCount();
         }
 //        if (currentVersion % 100 == 0) {
 //            System.out.println("V." + currentVersion + " of " + System.identityHashCode(this) +

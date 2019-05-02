@@ -1148,6 +1148,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
     final void copyFrom(MVMap<K, V> sourceMap) {
         MVStore.TxCounter txCounter = store.registerVersionUsage();
         try {
+            beforeWrite();
             copy(sourceMap.getRootPage(), null, 0);
         } finally {
             store.deregisterVersionUsage(txCounter);
@@ -1155,7 +1156,6 @@ public class MVMap<K, V> extends AbstractMap<K, V>
     }
 
     private void copy(Page source, Page parent, int index) {
-        beforeWrite();
         Page target = source.copy(this);
         if (parent == null) {
             setInitialRoot(target, INITIAL_VERSION);
@@ -1173,8 +1173,9 @@ public class MVMap<K, V> extends AbstractMap<K, V>
             }
             target.setComplete();
         }
-        if (isPersistent()) {
-            store.registerUnsavedPage(target.getMemory());
+        store.registerUnsavedPage(target.getMemory());
+        if (store.isSaveNeeded()) {
+            store.commit();
         }
     }
 
