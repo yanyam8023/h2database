@@ -1151,7 +1151,7 @@ public class TestMVTableEngine extends TestDb {
             conn.close();
             long size = FileUtils.size(getBaseDir() + "/" + getTestName()
                     + Constants.SUFFIX_MV_FILE);
-            trace("Pass #" + i + ": size=" + size);
+//            trace("Pass #" + i + ": size=" + size);
             if (i < 10) {
                 maxSize = (int) (Math.max(size * 1.1, maxSize));
             } else if (size > maxSize) {

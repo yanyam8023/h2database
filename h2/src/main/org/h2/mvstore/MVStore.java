@@ -1670,15 +1670,19 @@ public class MVStore implements AutoCloseable {
     }
 
     private boolean canOverwriteChunk(Chunk c, long time, long oldestVersionToKeep) {
+        return c.unusedAtVersion != 0 && c.unusedAtVersion <= oldestVersionToKeep;
+    }
+
+    private boolean isRecentChunk(Chunk c, long time) {
         if (retentionTime >= 0) {
             if (c.time + retentionTime > time) {
-                return false;
+                return true;
             }
-            if (c.unused == 0 || c.unused + retentionTime / 2 > time) {
-                return false;
-            }
+//            if (c.unused == 0 || c.unused + retentionTime / 2 > time) {
+//                return true;
+//            }
         }
-        return c.unusedAtVersion != 0 && c.unusedAtVersion <= oldestVersionToKeep;
+        return false;
     }
 
     private long getTimeSinceCreation() {
@@ -2006,30 +2010,40 @@ public class MVStore implements AutoCloseable {
      * @return if a chunk was re-written
      */
     public boolean compact(int targetFillRate, int write) {
-        if (reuseSpace) {
+        if (reuseSpace && lastChunk != null) {
             checkOpen();
-            // We can't wait forever for the lock here,
-            // because if called from the background thread,
-            // it might go into deadlock with concurrent database closure
-            // and attempt to stop this thread.
-            try {
-                if (!storeLock.isHeldByCurrentThread() &&
-                        storeLock.tryLock(10, TimeUnit.MILLISECONDS)) {
-                    TxCounter txCounter = registerVersionUsage();
-                    try {
-                        Iterable<Chunk> old = findOldChunks(targetFillRate, write);
-                        if (old != null) {
-                            HashSet<Integer> idSet = createIdSet(old);
-                            return !idSet.isEmpty() && compactRewrite(idSet) > 0;
+            if (targetFillRate > 0 && getChunksFillRate() < targetFillRate) {
+                // We can't wait forever for the lock here,
+                // because if called from the background thread,
+                // it might go into deadlock with concurrent database closure
+                // and attempt to stop this thread.
+                try {
+                    if (!storeLock.isHeldByCurrentThread() &&
+                            storeLock.tryLock(10, TimeUnit.MILLISECONDS)) {
+                        try {
+                            return rewriteChunks(write);
+                        } finally {
+                            storeLock.unlock();
                         }
-                    } finally {
-                        deregisterVersionUsage(txCounter);
-                        storeLock.unlock();
                     }
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
                 }
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
             }
+        }
+        return false;
+    }
+
+    private boolean rewriteChunks(int write) {
+        TxCounter txCounter = registerVersionUsage();
+        try {
+            Iterable<Chunk> old = findOldChunks(write);
+            if (old != null) {
+                HashSet<Integer> idSet = createIdSet(old);
+                return !idSet.isEmpty() && compactRewrite(idSet) > 0;
+            }
+        } finally {
+            deregisterVersionUsage(txCounter);
         }
         return false;
     }
@@ -2049,14 +2063,24 @@ public class MVStore implements AutoCloseable {
         for (Chunk c : chunks.values()) {
             assert c.maxLen >= 0;
             maxLengthSum += c.maxLen;
-            if (c.time + retentionTime > time) {
-                // young chunks (we don't optimize those):
-                // assume if they are fully live
-                // so that we don't try to optimize yet
-                // until they get old
-                maxLengthLiveSum += c.maxLen;
-            } else {
-                maxLengthLiveSum += c.maxLenLive;
+            maxLengthLiveSum += c.maxLenLive;
+        }
+        // the fill rate of all chunks combined
+        int fillRate = (int) (100 * maxLengthLiveSum / maxLengthSum);
+        return fillRate;
+    }
+
+    public int getActionableChunksFillRate() {
+        long maxLengthSum = 1;
+        long maxLengthLiveSum = 1;
+        long time = getTimeSinceCreation();
+        for (Chunk c : chunks.values()) {
+            assert c.maxLen >= 0;
+            if (!isRecentChunk(c, time)) {
+                maxLengthSum += c.maxLen;
+                if (c.pageCountLive > 0 && c.pageCountLive < c.pageCount) {
+                    maxLengthLiveSum += c.maxLenLive;
+                }
             }
         }
         // the fill rate of all chunks combined
@@ -2064,15 +2088,9 @@ public class MVStore implements AutoCloseable {
         return fillRate;
     }
 
-    private Iterable<Chunk> findOldChunks(int targetFillRate, int writeLimit) {
-        if (lastChunk == null) {
-            // nothing to do
-            return null;
-        }
+    private Iterable<Chunk> findOldChunks(int writeLimit) {
+        assert lastChunk != null;
         long time = getTimeSinceCreation();
-        if (targetFillRate < 100 && getChunksFillRate() >= targetFillRate) {
-            return null;
-        }
 
         // the queue will contain chunks we want to free up
         PriorityQueue<Chunk> queue = new PriorityQueue<>(this.chunks.size() / 4 + 1,
@@ -2769,63 +2787,52 @@ public class MVStore implements AutoCloseable {
             if (autoCompactLastFileOpCount != fileOpCount) {
                 thresholdRate /= 3;
             }
-            while (true) {
+            long startm = System.currentTimeMillis();
+            int initFillRate = 0;
+            int initActChunksFillRate = 0;
+            int initChunksFillRate = 0;
+            for (int cnt = 0; ; cnt++) {
                 int fillRate = fileStore.getFillRate();
-                int chunksFillRate = getChunksFillRate();
-                int effectiveFillRate = fillRate * chunksFillRate / 100;
-                if (effectiveFillRate > thresholdRate) {
-                    break;
+                int chunksFillRate = 100;
+                if (fillRate > thresholdRate) {
+                    chunksFillRate = getActionableChunksFillRate();
+                    if (chunksFillRate > thresholdRate) {
+                        if (cnt > 0) {
+                            System.out.println("V." + currentVersion + " loops: " + cnt +
+                                                ": fill rate: " + initFillRate + "->" + getFileStore().getFillRate() +
+                                                "%, chunk fill rate: " +initChunksFillRate + "->" + getChunksFillRate() +
+                                                "%, act chunk fill rate: " + initActChunksFillRate + "->" + chunksFillRate +
+                                                "%, file size: " + fileStore.getFileLengthInUse() + ", time: " + (System.currentTimeMillis() - startm));
+                        }
+                        break;
+                    }
+                }
+                if (cnt == 0) {
+                    initFillRate = fillRate;
+                    initActChunksFillRate = chunksFillRate;
+                    initChunksFillRate = getChunksFillRate();
                 }
                 storeLock.lock();
                 try {
-                    int oldRetentionTime = retentionTime;
-                    boolean oldReuse = reuseSpace;
-                    try {
-                        retentionTime = -1;
-                        dropUnusedChunks();
-                        fillRate = fileStore.getFillRate();
-                        chunksFillRate = getChunksFillRate();
-                        if ((100 - chunksFillRate) > 2 * (100 - fillRate)) {
-                            int writeLimit = autoCommitMemory * thresholdRate / Math.max(chunksFillRate, 1);
-                            TxCounter txCounter = registerVersionUsage();
-                            try {
-                                Iterable<Chunk> old = findOldChunks(100, writeLimit);
-                                if (old != null) {
-                                    HashSet<Integer> idSet = createIdSet(old);
-                                    if (!idSet.isEmpty() && compactRewrite(idSet) > 0) {
-                                        dropUnusedChunks();
-                                        fillRate = fileStore.getFillRate();
-                                    }
-                                }
-                            } finally {
-                                deregisterVersionUsage(txCounter);
-                            }
+                    if (8 * (100 - chunksFillRate) > 7 * (100 - fillRate)) {
+                        int writeLimit = autoCommitMemory * thresholdRate / Math.max(chunksFillRate, 1);
+                        if (rewriteChunks(writeLimit)) {
+                            dropUnusedChunks();
+                            fillRate = fileStore.getFillRate();
                         }
-
-                    } finally {
-                        reuseSpace = oldReuse;
-                        retentionTime = oldRetentionTime;
                     }
 
-                    if (fillRate < autoCompactFillRate) {
-                        int writeLimit = autoCommitMemory * thresholdRate / Math.max(fillRate, 1);
-                        long start = fileStore.getFirstFree() / BLOCK_SIZE;
-                        long maxBlocksToMove = writeLimit / BLOCK_SIZE;
-                        Iterable<Chunk> move = findChunksToMove(start, maxBlocksToMove);
-                        compactMoveChunks(move);
-                    }
+                    int writeLimit = autoCommitMemory * thresholdRate / Math.max(fillRate, 1);
+                    long start = fileStore.getFirstFree() / BLOCK_SIZE;
+                    long maxBlocksToMove = writeLimit / BLOCK_SIZE;
+                    Iterable<Chunk> move = findChunksToMove(start, maxBlocksToMove);
+                    compactMoveChunks(move);
                 } finally {
                     storeLock.unlock();
                 }
             }
-            autoCompactLastFileOpCount = fileStore.getWriteCount() + fileStore.getReadCount();
         }
-//        if (currentVersion % 100 == 0) {
-//            System.out.println("V." + currentVersion + " of " + System.identityHashCode(this) +
-//                                ": fill rate: " + getFileStore().getFillRate() +
-//                                "%, chunk fill rate: " + getChunksFillRate() +
-//                                "%, file size: " + fileStore.getFileLengthInUse());
-//        }
+        autoCompactLastFileOpCount = fileStore.getWriteCount() + fileStore.getReadCount();
     }
 
     private void handleException(Throwable ex) {
@@ -3110,7 +3117,7 @@ public class MVStore implements AutoCloseable {
         // we can not remove chunks here via use of iterator here due to concurrency concerns
         // and use remove() instead
         for (Chunk chunk : chunks.values()) {
-            if (canOverwriteChunk(chunk, time, oldestVersionToKeep)) {
+            if (!isRecentChunk(chunk, time) && canOverwriteChunk(chunk, time, oldestVersionToKeep)) {
                 dropChunk(chunk);
             }
         }
