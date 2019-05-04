@@ -2778,16 +2778,17 @@ public class MVStore implements AutoCloseable {
             if (autoCompactLastFileOpCount != fileOpCount) {
                 thresholdRate /= 3;
             }
-            long startm = System.currentTimeMillis();
-            int initFillRate = 0;
-            int initActChunksFillRate = 0;
-            int initChunksFillRate = 0;
+//            long startm = System.currentTimeMillis();
+//            int initFillRate = 0;
+//            int initActChunksFillRate = 0;
+//            int initChunksFillRate = 0;
             for (int cnt = 0; ; cnt++) {
                 int fillRate = fileStore.getFillRate();
                 int chunksFillRate = 100;
                 if (fillRate > thresholdRate) {
                     chunksFillRate = getActionableChunksFillRate();
                     if (chunksFillRate > thresholdRate) {
+/*
                         if (cnt > 0) {
                             System.out.println("V." + currentVersion + " loops: " + cnt +
                                                 ": fill rate: " + initFillRate + "->" + getFileStore().getFillRate() +
@@ -2795,14 +2796,15 @@ public class MVStore implements AutoCloseable {
                                                 "%, act chunk fill rate: " + initActChunksFillRate + "->" + chunksFillRate +
                                                 "%, file size: " + fileStore.getFileLengthInUse() + ", time: " + (System.currentTimeMillis() - startm));
                         }
+*/
                         break;
                     }
                 }
-                if (cnt == 0) {
-                    initFillRate = fillRate;
-                    initActChunksFillRate = chunksFillRate;
-                    initChunksFillRate = getChunksFillRate();
-                }
+//                if (cnt == 0) {
+//                    initFillRate = fillRate;
+//                    initActChunksFillRate = chunksFillRate;
+//                    initChunksFillRate = getChunksFillRate();
+//                }
                 storeLock.lock();
                 try {
                     if (8 * (100 - chunksFillRate) > 7 * (100 - fillRate)) {
