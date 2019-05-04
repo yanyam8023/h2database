@@ -1669,20 +1669,12 @@ public class MVStore implements AutoCloseable {
         }
     }
 
-    private boolean canOverwriteChunk(Chunk c, long time, long oldestVersionToKeep) {
+    private boolean canOverwriteChunk(Chunk c, long oldestVersionToKeep) {
         return c.unusedAtVersion != 0 && c.unusedAtVersion <= oldestVersionToKeep;
     }
 
-    private boolean isRecentChunk(Chunk c, long time) {
-        if (retentionTime >= 0) {
-            if (c.time + retentionTime > time) {
-                return true;
-            }
-//            if (c.unused == 0 || c.unused + retentionTime / 2 > time) {
-//                return true;
-//            }
-        }
-        return false;
+    private boolean isRecentChunk(Chunk chunk, long time) {
+        return retentionTime >= 0 && chunk.time + retentionTime > time;
     }
 
     private long getTimeSinceCreation() {
@@ -2070,7 +2062,7 @@ public class MVStore implements AutoCloseable {
         return fillRate;
     }
 
-    public int getActionableChunksFillRate() {
+    private int getActionableChunksFillRate() {
         long maxLengthSum = 1;
         long maxLengthLiveSum = 1;
         long time = getTimeSinceCreation();
@@ -2112,19 +2104,18 @@ public class MVStore implements AutoCloseable {
             // (it's possible to compact chunks earlier, but right
             // now we don't do that)
             int liveCount = chunk.pageCountLive;
-            if (liveCount > 0 && liveCount < chunk.pageCount) {
-                if (chunk.isSaved() && chunk.time + retentionTime <= time) {
-                    long age = latestVersion - chunk.version;
-                    chunk.collectPriority = (int) (chunk.getFillRate() * 1000 / age);
-                    totalSize += chunk.maxLenLive;
-                    queue.offer(chunk);
-                    while (totalSize > writeLimit) {
-                        Chunk removed = queue.poll();
-                        if (removed == null) {
-                            break;
-                        }
-                        totalSize -= removed.maxLenLive;
+            if (liveCount > 0 && liveCount < chunk.pageCount &&
+                    chunk.isSaved() && !isRecentChunk(chunk, time)) {
+                long age = latestVersion - chunk.version;
+                chunk.collectPriority = (int) (chunk.getFillRate() * 1000 / age);
+                totalSize += chunk.maxLenLive;
+                queue.offer(chunk);
+                while (totalSize > writeLimit) {
+                    Chunk removed = queue.poll();
+                    if (removed == null) {
+                        break;
                     }
+                    totalSize -= removed.maxLenLive;
                 }
             }
         }
@@ -2816,10 +2807,10 @@ public class MVStore implements AutoCloseable {
                 try {
                     if (8 * (100 - chunksFillRate) > 7 * (100 - fillRate)) {
                         int writeLimit = autoCommitMemory * thresholdRate / Math.max(chunksFillRate, 1);
-                        if (rewriteChunks(writeLimit)) {
-                            dropUnusedChunks();
-                            fillRate = fileStore.getFillRate();
+                        if ((!rewriteChunks(writeLimit) || dropUnusedChunks() == 0) && cnt > 0) {
+                            break;
                         }
+                        fillRate = fileStore.getFillRate();
                     }
 
                     int writeLimit = autoCommitMemory * thresholdRate / Math.max(fillRate, 1);
@@ -3110,28 +3101,27 @@ public class MVStore implements AutoCloseable {
         dropUnusedVersions();
     }
 
-    private void dropUnusedChunks() {
+    private int dropUnusedChunks() {
         assert storeLock.isHeldByCurrentThread();
         long oldestVersionToKeep = getOldestVersionToKeep();
         long time = getTimeSinceCreation();
-        // we can not remove chunks here via use of iterator here due to concurrency concerns
-        // and use remove() instead
+        int count = 0;
         for (Chunk chunk : chunks.values()) {
-            if (!isRecentChunk(chunk, time) && canOverwriteChunk(chunk, time, oldestVersionToKeep)) {
-                dropChunk(chunk);
+            if (!isRecentChunk(chunk, time) && canOverwriteChunk(chunk, oldestVersionToKeep)) {
+                if (meta.remove(Chunk.getMetaKey(chunk.id)) != null) {
+                    markMetaChanged();
+                }
+                // we can not remove chunks here via use of iterator
+                // due to concurrency concerns and use remove() instead
+                if (chunks.remove(chunk.id) != null) {
+                    if (chunk.isSaved()) {
+                        freeChunkSpace(chunk);
+                    }
+                }
+                ++count;
             }
         }
-    }
-
-    private void dropChunk(Chunk chunk) {
-        if (meta.remove(Chunk.getMetaKey(chunk.id)) != null) {
-            markMetaChanged();
-        }
-        if (chunks.remove(chunk.id) != null) {
-            if (chunk.isSaved()) {
-                freeChunkSpace(chunk);
-            }
-        }
+        return count;
     }
 
     private void freeChunkSpace(Chunk chunk) {
