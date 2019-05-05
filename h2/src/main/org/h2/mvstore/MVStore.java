@@ -2143,7 +2143,11 @@ public class MVStore implements AutoCloseable {
                     rewritedPageCount += map.rewrite(set);
                 }
             }
-            rewritedPageCount += meta.rewrite(set);
+            int rewriteMetaCount = meta.rewrite(set);
+            if (rewriteMetaCount > 0) {
+                markMetaChanged();
+                rewritedPageCount += rewriteMetaCount;
+            }
         } finally {
             storeLock.lock();
         }
@@ -2155,7 +2159,7 @@ public class MVStore implements AutoCloseable {
     private boolean validateRewrite(Set<Integer> set) {
         for (Integer chunkId : set) {
             Chunk chunk = chunks.get(chunkId);
-            assert chunk == null || chunk.pageCountLive == 0;
+            assert chunk == null || chunk.pageCountLive == 0 : chunk;
         }
         return true;
     }
