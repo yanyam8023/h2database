@@ -1201,6 +1201,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 }
 
                 Page rootPage = rootReference.root;
+                long version = rootReference.version;
 
                 CursorPos pos = rootPage.getAppendCursorPos(null);
                 assert pos != null;
@@ -1286,7 +1287,8 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                     lockedRootReference = null;
                     if (isPersistent()) {
                         if (tip != null) {
-                            unsavedMemoryHolder.value -= tip.calculateUnsavedMemoryAdjustment();
+                            tip.dropSavedDeletedPages(unsavedMemoryHolder, version);
+//                            unsavedMemoryHolder.value -= tip.calculateUnsavedMemoryAdjustment();
                         }
                         store.registerUnsavedPage(unsavedMemoryHolder.value);
                     }
@@ -1681,6 +1683,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 rootReference = lockedRootReference;
             }
             Page rootPage = rootReference.root;
+            long version = rootReference.version;
             CursorPos tip;
             V result;
             unsavedMemoryHolder.value = 0;
@@ -1792,7 +1795,8 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                     lockedRootReference = null;
                 }
                 if (isPersistent()) {
-                    unsavedMemoryHolder.value -= tip.calculateUnsavedMemoryAdjustment();
+                    tip.dropSavedDeletedPages(unsavedMemoryHolder, version);
+//                    unsavedMemoryHolder.value -= tip.calculateUnsavedMemoryAdjustment();
                     store.registerUnsavedPage(unsavedMemoryHolder.value);
                 }
                 return result;

@@ -41,9 +41,16 @@ public class CursorPos implements RootReference.VisitablePages
     public void visitPages(Page.Visitor visitor) {
         for (CursorPos head = this; head != null; head = head.parent) {
             Page page = head.page;
-            if (page.getTotalCount() > 0) {
-                long pagePos = page.getPos();
-                visitor.visit(page, pagePos);
+            if (page != null) {
+                if (page.getTotalCount() > 0) {
+                    long pagePos = page.getPos();
+                    visitor.visit(page, pagePos);
+                }
+            } else {
+                int chunkId = head.index >>> 5;
+                int length = DataUtils.getPageMaxLength(head.index << 1);
+                long pagePos = DataUtils.getPagePos(chunkId, 0, length, 0);
+                visitor.visit(null, pagePos);
             }
         }
     }
@@ -57,6 +64,26 @@ public class CursorPos implements RootReference.VisitablePages
             }
         }
         return unsavedMemory;
+    }
+
+    void dropSavedDeletedPages(MVMap.IntValueHolder unsavedMemoryHolder, long version) {
+        int unsavedMemory = 0;
+        for (CursorPos head = this; head != null; head = head.parent) {
+            Page page = head.page;
+            if (page.getTotalCount() > 0) {
+                if (page.isSaved()) {
+                    long pagePos = page.getPos();
+                    int chunkId = DataUtils.getPageChunkId(pagePos);
+                    if (chunkId <= version) {
+                        head.index = (int)((pagePos >> 1) & 31) | (int)(pagePos >>> 33);
+                        head.page = null;
+                    }
+                } else {
+                    unsavedMemory += page.getMemory();
+                }
+            }
+        }
+        unsavedMemoryHolder.value -= unsavedMemory;
     }
 
     long[] collectRemovedPagePositions(MVMap.IntValueHolder unsavedMemoryHolder, long version) {
