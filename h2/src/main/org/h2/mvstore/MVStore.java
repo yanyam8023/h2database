@@ -2026,10 +2026,10 @@ public class MVStore implements AutoCloseable {
         return false;
     }
 
-    private boolean rewriteChunks(int write) {
+    private boolean rewriteChunks(int writeLimit) {
         TxCounter txCounter = registerVersionUsage();
         try {
-            Iterable<Chunk> old = findOldChunks(write);
+            Iterable<Chunk> old = findOldChunks(writeLimit);
             if (old != null) {
                 HashSet<Integer> idSet = createIdSet(old);
                 return !idSet.isEmpty() && compactRewrite(idSet) > 0;
@@ -2051,7 +2051,6 @@ public class MVStore implements AutoCloseable {
     public int getChunksFillRate() {
         long maxLengthSum = 1;
         long maxLengthLiveSum = 1;
-        long time = getTimeSinceCreation();
         for (Chunk c : chunks.values()) {
             assert c.maxLen >= 0;
             maxLengthSum += c.maxLen;
@@ -2764,8 +2763,19 @@ public class MVStore implements AutoCloseable {
             if (time > lastCommitTime + autoCommitDelay) {
                 tryCommit();
             }
-
             doMaintance();
+/*
+            if (autoCompactFillRate > 0) {
+                // whether there were file read or write operations since
+                // the last time
+                boolean fileOps;
+                // use a lower fill rate if there were any file operations
+                int targetFillRate = autoCompactLastFileOpCount != fileStore.getWriteCount() + fileStore.getReadCount() ?
+                                                        autoCompactFillRate / 3 : autoCompactFillRate;
+                compact(targetFillRate, autoCommitMemory);
+                autoCompactLastFileOpCount = fileStore.getWriteCount() + fileStore.getReadCount();
+            }
+*/
         } catch (Throwable e) {
             handleException(e);
             if (backgroundExceptionHandler == null) {
