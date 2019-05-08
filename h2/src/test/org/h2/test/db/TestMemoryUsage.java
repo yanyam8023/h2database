@@ -63,7 +63,7 @@ public class TestMemoryUsage extends TestDb {
             return;
         }
         deleteDb("memoryUsage");
-        conn = getConnection("memoryUsage");
+        conn = getConnection("memoryUsage;WRITE_DELAY=0");
         try {
             eatMemory(4000);
             for (int i = 0; i < 4000; i++) {
@@ -127,7 +127,7 @@ public class TestMemoryUsage extends TestDb {
             return;
         }
         deleteDb("memoryUsageClob");
-        conn = getConnection("memoryUsageClob");
+        conn = getConnection("memoryUsageClob;WRITE_DELAY=0");
         Statement stat = conn.createStatement();
         stat.execute("SET MAX_LENGTH_INPLACE_LOB 8192");
         stat.execute("SET CACHE_SIZE 8000");
