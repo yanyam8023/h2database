@@ -557,7 +557,17 @@ public final class DataUtils {
      * @return true if page has been saved
      */
     public static boolean isPageSaved(long pos) {
-        return pos != 0;
+        return (pos & ~1L) != 0;
+    }
+
+    /**
+     * Find out if page was removed.
+     *
+     * @param pos the position
+     * @return true if page has been removed (no longer accessible from the current root of the tree)
+     */
+    public static boolean isPageRemoved(long pos) {
+        return pos == 1L;
     }
 
     /**

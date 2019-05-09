@@ -17,6 +17,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import org.h2.compress.Compressor;
 import org.h2.message.DbException;
 import org.h2.mvstore.type.DataType;
@@ -70,6 +71,12 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
      * The keys.
      */
     private Object[] keys;
+
+    /**
+     * Updater for pos field
+     */
+    private static final AtomicLongFieldUpdater<Page> posUpdater =
+                                                AtomicLongFieldUpdater.newUpdater(Page.class, "pos");
 
     /**
      * The estimated number of bytes used per child entry.
@@ -683,6 +690,14 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
         return DataUtils.isPageSaved(pos);
     }
 
+    public final boolean isRemoved() {
+        return DataUtils.isPageRemoved(pos);
+    }
+
+    public final boolean markAsRemoved() {
+        return posUpdater.compareAndSet(this, 0L, 1L);
+    }
+
     /**
      * Store the page and update the position.
      *
@@ -743,7 +758,11 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
             throw DataUtils.newIllegalStateException(
                     DataUtils.ERROR_INTERNAL, "Page already stored");
         }
-        pos = DataUtils.getPagePos(chunkId, start, pageLength, type);
+        long pagePos = DataUtils.getPagePos(chunkId, start, pageLength, type);
+        boolean isDeleted = isRemoved();
+        while (!posUpdater.compareAndSet(this, isDeleted ? 1 : 0, pagePos)) {
+            isDeleted = isRemoved();
+        }
         store.cachePage(this);
         if (type == DataUtils.PAGE_TYPE_NODE) {
             // cache again - this will make sure nodes stays in the cache
@@ -752,9 +771,11 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
         }
         int max = DataUtils.getPageMaxLength(pos);
         chunk.maxLen += max;
-        chunk.maxLenLive += max;
         chunk.pageCount++;
-        chunk.pageCountLive++;
+        if (!isDeleted) {
+            chunk.maxLenLive += max;
+            chunk.pageCountLive++;
+        }
         diskSpaceUsed = max != DataUtils.PAGE_LARGE ? max : pageLength;
         return typePos + 1;
     }
