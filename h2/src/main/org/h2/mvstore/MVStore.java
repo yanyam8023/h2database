@@ -217,7 +217,7 @@ public class MVStore implements AutoCloseable {
     /**
      * The map of chunks.
      */
-    private final ConcurrentHashMap<Integer, Chunk> chunks =
+    final ConcurrentHashMap<Integer, Chunk> chunks =
             new ConcurrentHashMap<>();
 
     private long updateCounter = 0;
@@ -256,7 +256,7 @@ public class MVStore implements AutoCloseable {
     /**
      * The version of the last stored chunk, or -1 if nothing was stored so far.
      */
-    private long lastStoredVersion = INITIAL_VERSION;
+    private volatile long lastStoredVersion = INITIAL_VERSION;
 
     /**
      * Oldest store version in use. All version beyond this can be safely dropped
@@ -1303,7 +1303,6 @@ public class MVStore implements AutoCloseable {
             accountForRemovedPages(removalInfo, version);
         }
 
-        int cnt = 0;
         Page metaRoot;
         RootReference.RemovalInfoNode removalInfo;
         do {
@@ -1313,7 +1312,7 @@ public class MVStore implements AutoCloseable {
             metaRoot = metaRootReference.root;
             metaRoot.writeUnsavedRecursive(c, buff);
             removalInfo = metaRootReference.extractRemovalInfo();
-        } while(meta.isPersistent() && removalInfo != null && accountForRemovedPages(removalInfo, version) && ++cnt > 0);
+        } while(meta.isPersistent() && removalInfo != null && accountForRemovedPages(removalInfo, version));
 
         onVersionChange(version);
 
@@ -2194,39 +2193,43 @@ public class MVStore implements AutoCloseable {
 
     private boolean accountForRemovedPages(RootReference.RemovalInfoNode removalInfo, final long version) {
         final Set<Chunk> modified = new HashSet<>();
+        Page.Visitor visitor = new Page.Visitor() {
+            private long time = 0;
+
+            @Override
+            public void visit(Page page, long pagePos) {
+                if (!DataUtils.isPageSaved(pagePos) || DataUtils.getPageChunkId(pagePos) > version) {
+                    return;
+                }
+                int chunkId = DataUtils.getPageChunkId(pagePos);
+                int pageLength = DataUtils.getPageMaxLength(pagePos);
+
+                Chunk chunk = chunks.get(chunkId);
+                chunk.maxLenLive -= pageLength;
+                chunk.pageCountLive--;
+
+                assert chunk.pageCountLive >= 0 : chunk;
+                assert chunk.maxLenLive >= 0 : chunk;
+                assert (chunk.pageCountLive == 0) == (chunk.maxLenLive == 0) : chunk;
+
+                if (chunk.pageCountLive == 0 && chunk.maxLenLive == 0) {
+                    chunk.unusedAtVersion = version;
+                    if (time == 0) {
+                        time = getTimeSinceCreation();
+                    }
+                    chunk.unused = time;
+                }
+                if (chunk.isSaved()) {
+                    modified.add(chunk);
+                }
+            }
+        };
+
         while (removalInfo != null) {
             RootReference.VisitablePages pages = removalInfo.data;
-            pages.visitPages(new Page.Visitor() {
-                private long time = 0;
-
-                @Override
-                public void visit(Page page, long pagePos) {
-                    if (!DataUtils.isPageSaved(pagePos) || DataUtils.getPageChunkId(pagePos) > version) {
-                        return;
-                    }
-                    int chunkId = DataUtils.getPageChunkId(pagePos);
-                    int pageLength = DataUtils.getPageMaxLength(pagePos);
-
-                    Chunk chunk = chunks.get(chunkId);
-                    chunk.maxLenLive -= pageLength;
-                    chunk.pageCountLive--;
-
-                    assert chunk.pageCountLive >= 0 : chunk;
-                    assert chunk.maxLenLive >= 0 : chunk;
-                    assert (chunk.pageCountLive == 0) == (chunk.maxLenLive == 0) : chunk;
-
-                    if (chunk.pageCountLive == 0 && chunk.maxLenLive == 0) {
-                        chunk.unusedAtVersion = version;
-                        if (time == 0) {
-                            time = getTimeSinceCreation();
-                        }
-                        chunk.unused = time;
-                    }
-                    if (chunk.isSaved()) {
-                        modified.add(chunk);
-                    }
-                }
-            });
+            if (pages != null) {
+                pages.visitPages(visitor);
+            }
             removalInfo = removalInfo.next;
         }
         if (!modified.isEmpty()) {
@@ -2622,6 +2625,10 @@ public class MVStore implements AutoCloseable {
         return lastStoredVersion;
     }
 
+    public int getLastChunkId() {
+        return lastChunk == null ? (int)INITIAL_VERSION : lastChunk.id;
+    }
+
     /**
      * Get the file store.
      *
@@ -2954,7 +2961,7 @@ public class MVStore implements AutoCloseable {
         }
     }
 
-    boolean isBackgroundThread() {
+    public boolean isBackgroundThread() {
         return Thread.currentThread() == backgroundWriterThread.get();
     }
 

@@ -42,7 +42,7 @@ public class CursorPos implements RootReference.VisitablePages
         for (CursorPos head = this; head != null; head = head.parent) {
             Page page = head.page;
             if (page != null) {
-                if (page.getTotalCount() > 0) {
+                if (page.getTotalCount() > 0 || !page.isLeaf()) {
                     long pagePos = page.getPos();
                     visitor.visit(page, pagePos);
                 }
@@ -53,6 +53,42 @@ public class CursorPos implements RootReference.VisitablePages
                 visitor.visit(null, pagePos);
             }
         }
+    }
+
+    RootReference.VisitablePages shrinkRemovalInfo(MVMap.IntValueHolder unsavedMemoryHolder, int lastChunkId) {
+try { Thread.sleep(1); } catch (InterruptedException e) {}
+        int count = 0;
+        int unsavedMemory = 0;
+        for (CursorPos head = this; head != null; head = head.parent) {
+            Page page = head.page;
+            long pagePos = page.getPos();
+            if (DataUtils.isPageSaved(pagePos) && DataUtils.getPageChunkId(pagePos) <= lastChunkId) {
+                ++count;
+            } else {
+                if (page.markAsRemoved()) {
+                    unsavedMemory += page.getMemory();
+                } else if (DataUtils.getPageChunkId(page.getPos()) <= lastChunkId) {
+                    assert DataUtils.isPageSaved(page.getPos());
+                    ++count;
+                }
+            }
+        }
+        unsavedMemoryHolder.value -= unsavedMemory;
+        if (count == 0) {
+            return null;
+        }
+try { Thread.sleep(1); } catch (InterruptedException e) {}
+        final long[] positions = new long[count];
+        count = 0;
+        for (CursorPos head = this; head != null; head = head.parent) {
+            Page page = head.page;
+            long pagePos = page.getPos();
+            if (DataUtils.isPageSaved(pagePos) && DataUtils.getPageChunkId(pagePos) <= lastChunkId) {
+                positions[count++] = pagePos;
+            }
+        }
+
+        return new RootReference.RemovalInfo(positions);
     }
 
     int calculateUnsavedMemoryAdjustment() {

@@ -47,7 +47,7 @@ public final class RootReference
     /**
      * Head of the linked list of RootReference.VisitablePages
      */
-    private RemovalInfoNode removalInfo;
+    private volatile RemovalInfoNode removalInfo;
 
 
     // This one is used to set root initially and for r/o snapshots
@@ -140,6 +140,17 @@ public final class RootReference
         return result;
     }
 
+    void updateRemovalInfoData(VisitablePages data) {
+        RemovalInfoNode ri = removalInfo;
+        if (ri != null) {
+//            if (data != null) {
+                ri.data = data;
+//            } else {
+//                removalInfo = removalInfo.next;
+//            }
+        }
+    }
+
     int getAppendCounter() {
         return appendCounter & 0xff;
     }
@@ -153,7 +164,7 @@ public final class RootReference
         return "RootReference(" + System.identityHashCode(root) + "," + version + "," + lockedForUpdate + ")";
     }
 
-    public  interface VisitablePages {
+    public interface VisitablePages {
         /**
          * Arrange for a specified visitor to visit every page in a subtree rooted at this page.
          * @param visitor to visit pages
@@ -161,14 +172,30 @@ public final class RootReference
         void visitPages(Page.Visitor visitor);
     }
 
-    static class RemovalInfoNode
+    static final class RemovalInfoNode
     {
-        public final VisitablePages data;
+        public volatile VisitablePages data;
         public final RemovalInfoNode next;
 
         RemovalInfoNode(VisitablePages data, RemovalInfoNode next) {
             this.data = data;
             this.next = next;
+        }
+    }
+
+    static final class RemovalInfo implements VisitablePages
+    {
+        private final long[] pagePositions;
+
+        RemovalInfo(long[] positions) {
+            pagePositions = positions;
+        }
+
+        @Override
+        public void visitPages(Page.Visitor visitor) {
+            for (long pagePos : pagePositions) {
+                visitor.visit(null, pagePos);
+            }
         }
     }
 }

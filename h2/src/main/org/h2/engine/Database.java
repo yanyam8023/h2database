@@ -2299,11 +2299,13 @@ public class Database implements DataHandler {
         session.setAllCommitted();
     }
 
-    private void throwLastBackgroundException() {
-        DbException b = backgroundException.getAndSet(null);
-        if (b != null) {
-            // wrap the exception, so we see it was thrown here
-            throw DbException.get(b.getErrorCode(), b, b.getMessage());
+    void throwLastBackgroundException() {
+        if (!store.getMvStore().isBackgroundThread()) {
+            DbException b = backgroundException.getAndSet(null);
+            if (b != null) {
+                // wrap the exception, so we see it was thrown here
+                throw DbException.get(b.getErrorCode(), b, b.getMessage());
+            }
         }
     }
 
