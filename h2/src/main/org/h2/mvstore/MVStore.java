@@ -1870,40 +1870,42 @@ public class MVStore implements AutoCloseable {
                 }
             }
         }
-        return queue;
+        return queue.isEmpty() ? null : queue;
     }
 
     private void compactMoveChunks(Iterable<Chunk> move) {
-        // this will ensure better recognition of the last chunk
-        // in case of power failure, since we are going to move older chunks
-        // to the end of the file
-        writeStoreHeader();
-        sync();
-        for (Chunk c : move) {
-            moveChunk(c, true);
-        }
+        if (move != null) {
+            // this will ensure better recognition of the last chunk
+            // in case of power failure, since we are going to move older chunks
+            // to the end of the file
+            writeStoreHeader();
+            sync();
+            for (Chunk c : move) {
+                moveChunk(c, true);
+            }
 
-        // update the metadata (store at the end of the file)
-        reuseSpace = false;
-        commit();
-        sync();
-
-        Chunk chunk = lastChunk;
-
-        // now re-use the empty space
-        reuseSpace = true;
-        for (Chunk c : move) {
-            moveChunk(c, false);
-        }
-
-        // update the metadata (within the file)
-        commit();
-        sync();
-        if (moveChunk(chunk, false)) {
+            // update the metadata (store at the end of the file)
+            reuseSpace = false;
             commit();
+            sync();
+
+            Chunk chunk = lastChunk;
+
+            // now re-use the empty space
+            reuseSpace = true;
+            for (Chunk c : move) {
+                moveChunk(c, false);
+            }
+
+            // update the metadata (within the file)
+            commit();
+            sync();
+            if (moveChunk(chunk, false)) {
+                commit();
+            }
+            shrinkFileIfPossible(0);
+            sync();
         }
-        shrinkFileIfPossible(0);
-        sync();
     }
 
     private boolean moveChunk(Chunk c, boolean toTheEnd) {
@@ -2118,10 +2120,7 @@ public class MVStore implements AutoCloseable {
             }
         }
 
-        if (queue.isEmpty()) {
-            return null;
-        }
-        return queue;
+        return queue.isEmpty() ? null : queue;
     }
 
     private int compactRewrite(Set<Integer> set) {
@@ -2132,12 +2131,19 @@ public class MVStore implements AutoCloseable {
         sync();
 
         int rewritedPageCount = 0;
+        for (MVMap<?, ?> m : maps.values()) {
+            @SuppressWarnings("unchecked")
+            MVMap<Object, Object> map = (MVMap<Object, Object>) m;
+            if (!map.isClosed() && map.isSingleWriter()) {
+                rewritedPageCount += map.rewrite(set);
+            }
+        }
         storeLock.unlock();
         try {
             for (MVMap<?, ?> m : maps.values()) {
                 @SuppressWarnings("unchecked")
                 MVMap<Object, Object> map = (MVMap<Object, Object>) m;
-                if (!map.isClosed()) {
+                if (!map.isClosed() && !map.isSingleWriter()) {
                     rewritedPageCount += map.rewrite(set);
                 }
             }
@@ -2211,6 +2217,8 @@ public class MVStore implements AutoCloseable {
                 assert chunk.pageCountLive >= 0 : chunk;
                 assert chunk.maxLenLive >= 0 : chunk;
                 assert (chunk.pageCountLive == 0) == (chunk.maxLenLive == 0) : chunk;
+                assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.remove(pagePos) != null
+                        : chunk + " " + pagePos + " " + chunk.pagePosToMapId;
 
                 if (chunk.pageCountLive == 0 && chunk.maxLenLive == 0) {
                     chunk.unusedAtVersion = version;

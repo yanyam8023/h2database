@@ -625,6 +625,10 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         return valueType;
     }
 
+    boolean isSingleWriter() {
+        return singleWriter;
+    }
+
     /**
      * Read a page.
      *
@@ -706,14 +710,12 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 // (this is not needed if anyway one of the children
                 // was changed, as this would have updated this
                 // page as well)
-                Page p2 = p;
-                while (!p2.isLeaf()) {
-                    p2 = p2.getChildPage(0);
+                while (!p.isLeaf()) {
+                    p = p.getChildPage(0);
                 }
-                if (!rewritePage(p2)) {
-                    return 0;
+                if (rewritePage(p)) {
+                    writtenPageCount = 1;
                 }
-                writtenPageCount++;
             }
         }
         return writtenPageCount;
