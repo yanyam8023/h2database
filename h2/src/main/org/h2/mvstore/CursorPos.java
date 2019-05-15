@@ -63,7 +63,7 @@ public class CursorPos implements RootReference.VisitablePages
             long pagePos = page.getPos();
             if (DataUtils.isPageSaved(pagePos) && DataUtils.getPageChunkId(pagePos) <= version) {
                 ++count;
-            } else {
+            } else if (page.getTotalCount() > 0) {
                 if (page.markAsRemoved()) {
                     unsavedMemory += page.getMemory();
                 } else if (DataUtils.getPageChunkId(page.getPos()) <= version) {
