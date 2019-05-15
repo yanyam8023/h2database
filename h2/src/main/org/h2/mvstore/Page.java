@@ -782,9 +782,9 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
         if (!isDeleted) {
             chunk.maxLenLive += max;
             chunk.pageCountLive++;
+            assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.put(pos, getMapId()) == null;
+            assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.size() == chunk.pageCountLive;
         }
-        assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.put(pos, getMapId()) == null;
-        assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.size() == chunk.pageCountLive;
         diskSpaceUsed = max != DataUtils.PAGE_LARGE ? max : pageLength;
         return typePos + 1;
     }

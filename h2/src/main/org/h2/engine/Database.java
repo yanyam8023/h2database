@@ -2300,7 +2300,7 @@ public class Database implements DataHandler {
     }
 
     void throwLastBackgroundException() {
-        if (!store.getMvStore().isBackgroundThread()) {
+        if (store == null || !store.getMvStore().isBackgroundThread()) {
             DbException b = backgroundException.getAndSet(null);
             if (b != null) {
                 // wrap the exception, so we see it was thrown here
