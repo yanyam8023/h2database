@@ -79,9 +79,7 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
     private static final AtomicLongFieldUpdater<Page> posUpdater =
                                                 AtomicLongFieldUpdater.newUpdater(Page.class, "pos");
 
-    public long id = idGenerator.incrementAndGet();
-
-    static final AtomicLong idGenerator = new AtomicLong();
+    public long id;
 
     /**
      * The estimated number of bytes used per child entry.
@@ -127,6 +125,7 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
 
 
     Page(MVMap<?, ?> map) {
+        this.id = map.store.idGenerator.incrementAndGet();
         this.map = map;
     }
 
@@ -136,6 +135,7 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
     }
 
     Page(MVMap<?, ?> map, Object[] keys) {
+        this.id = map.store.idGenerator.incrementAndGet();
         this.map = map;
         this.keys = keys;
     }
@@ -428,7 +428,7 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
     public final Page copy() {
         Page newPage = clone();
         newPage.pos = 0;
-        newPage.id = idGenerator.incrementAndGet();
+        newPage.id = map.store.idGenerator.incrementAndGet();
         return newPage;
     }
 
@@ -785,6 +785,7 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
             assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.put(pos, getMapId()) == null;
             assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.size() == chunk.pageCountLive;
         }
+//        assert map.pageIdToChunkId == null || map.pageIdToChunkId.put(id, chunk.id) != null;
         diskSpaceUsed = max != DataUtils.PAGE_LARGE ? max : pageLength;
         return typePos + 1;
     }
@@ -1301,6 +1302,9 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
                 long pagePos = ref.getPos();
                 Page page = ref.getPage();
                 if (page == null ? DataUtils.isLeafPosition(pagePos) : page.isLeaf()) {
+                    if (page == null) {
+                        page = getChildPage(i);
+                    }
                     visitor.visit(page, pagePos);
                 } else {
                     if (page == null) {

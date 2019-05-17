@@ -29,6 +29,8 @@ public final class RootReference
     final boolean lockedForUpdate;
     /**
      * Reference to the previous root in the chain.
+     * That is the last root of the previous version, which had any data changes.
+     * Versions without any data changes are dropped from the chain, as it built.
      */
     volatile RootReference previous;
     /**
@@ -107,7 +109,9 @@ public final class RootReference
         this.previous = previous;
         this.updateCounter = r.updateCounter + 1;
         this.updateAttemptCounter = r.updateAttemptCounter + attempt;
-        this.lockedForUpdate = r.lockedForUpdate;
+        assert !previous.lockedForUpdate;
+        this.lockedForUpdate = false;
+//        this.lockedForUpdate = r.lockedForUpdate;
         this.appendCounter = r.appendCounter;
         this.removalInfo = null;
     }
@@ -120,7 +124,10 @@ public final class RootReference
         return new RootReference(this, attemptCounter);
     }
 
-    RootReference updateVersion(RootReference previous, long version, int attempt) {
+    RootReference unlockAndUpdateVersion(RootReference previous, long version, int attempt) {
+        if (previous.lockedForUpdate) {
+            previous = new RootReference(previous, previous.root, previous.getAppendCounter(), false, null);
+        }
         return new RootReference(this, previous, version, attempt);
     }
 
@@ -128,10 +135,24 @@ public final class RootReference
         return new RootReference(this, page, appendCounter, lockedForUpdate, removedPositions);
     }
 
+    void removeUnusedOldVersions(long oldest) {
+        // We need to keep at least one previous version (if any) here,
+        // because in order to retain whole history of some version
+        // we really need last root of the previous version.
+        // Root labeled with version "X" is the LAST known root for that version
+        // and therefore the FIRST known root for the version "X+1"
+        for(RootReference rootRef = this; rootRef != null; rootRef = rootRef.previous) {
+            if (rootRef.version < oldest) {
+                rootRef.previous = null;
+            }
+        }
+    }
+
     long getVersion() {
-        return previous == null || previous.root != root ||
-                previous.appendCounter != appendCounter ?
-                    version : previous.version;
+        RootReference prev = this.previous;
+        return prev == null || prev.root != root ||
+                prev.appendCounter != appendCounter ?
+                    version : prev.version;
     }
 
     RemovalInfoNode extractRemovalInfo() {
@@ -161,7 +182,8 @@ public final class RootReference
 
     @Override
     public String toString() {
-        return "RootReference(" + System.identityHashCode(root) + "," + version + "," + lockedForUpdate + ")";
+        return "RootReference{" + System.identityHashCode(root) + "," + version + "," + lockedForUpdate +
+                "," + getAppendCounter() + ", " + (removalInfo == null ? "null" : "rinf") + "}";
     }
 
     public interface VisitablePages {

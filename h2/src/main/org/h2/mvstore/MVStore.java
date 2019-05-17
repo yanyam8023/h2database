@@ -317,6 +317,8 @@ public class MVStore implements AutoCloseable {
 
     private long lastTimeAbsolute;
 
+    final AtomicLong idGenerator = new AtomicLong();
+
     /**
      * Create and open the store.
      *
@@ -2131,19 +2133,20 @@ public class MVStore implements AutoCloseable {
         sync();
 
         int rewritedPageCount = 0;
-        for (MVMap<?, ?> m : maps.values()) {
-            @SuppressWarnings("unchecked")
-            MVMap<Object, Object> map = (MVMap<Object, Object>) m;
-            if (!map.isClosed() && map.isSingleWriter()) {
-                rewritedPageCount += map.rewrite(set);
-            }
-        }
-        storeLock.unlock();
-        try {
+//        for (MVMap<?, ?> m : maps.values()) {
+//            @SuppressWarnings("unchecked")
+//            MVMap<Object, Object> map = (MVMap<Object, Object>) m;
+//            if (!map.isClosed() && map.isSingleWriter()) {
+//                rewritedPageCount += map.rewrite(set);
+//            }
+//        }
+
+//        storeLock.unlock();
+//        try {
             for (MVMap<?, ?> m : maps.values()) {
                 @SuppressWarnings("unchecked")
                 MVMap<Object, Object> map = (MVMap<Object, Object>) m;
-                if (!map.isClosed() && !map.isSingleWriter()) {
+                if (!map.isClosed() /*&& !map.isSingleWriter()*/) {
                     rewritedPageCount += map.rewrite(set);
                 }
             }
@@ -2152,9 +2155,9 @@ public class MVStore implements AutoCloseable {
                 markMetaChanged();
                 rewritedPageCount += rewriteMetaCount;
             }
-        } finally {
-            storeLock.lock();
-        }
+//        } finally {
+//            storeLock.lock();
+//        }
         commit();
         assert validateRewrite(set);
         return rewritedPageCount;
@@ -2163,7 +2166,7 @@ public class MVStore implements AutoCloseable {
     private boolean validateRewrite(Set<Integer> set) {
         for (Integer chunkId : set) {
             Chunk chunk = chunks.get(chunkId);
-            assert chunk == null || chunk.pageCountLive == 0 : chunk;
+            assert chunk == null || chunk.pageCountLive == 0 : chunk + " " + chunk.pagePosToMapId;
         }
         return true;
     }
