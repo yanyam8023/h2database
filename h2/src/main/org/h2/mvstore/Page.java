@@ -18,7 +18,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
-import java.util.concurrent.atomic.AtomicLong;
+//import java.util.concurrent.atomic.AtomicLong;
 import org.h2.compress.Compressor;
 import org.h2.message.DbException;
 import org.h2.mvstore.type.DataType;
@@ -79,7 +79,7 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
     private static final AtomicLongFieldUpdater<Page> posUpdater =
                                                 AtomicLongFieldUpdater.newUpdater(Page.class, "pos");
 
-    public long id;
+//    public long id;
 
     /**
      * The estimated number of bytes used per child entry.
@@ -125,7 +125,7 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
 
 
     Page(MVMap<?, ?> map) {
-        this.id = map.store.idGenerator.incrementAndGet();
+//        this.id = map.store.idGenerator.incrementAndGet();
         this.map = map;
     }
 
@@ -135,7 +135,7 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
     }
 
     Page(MVMap<?, ?> map, Object[] keys) {
-        this.id = map.store.idGenerator.incrementAndGet();
+//        this.id = map.store.idGenerator.incrementAndGet();
         this.map = map;
         this.keys = keys;
     }
@@ -412,7 +412,8 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
      * @param buff append buffer
      */
     protected void dump(StringBuilder buff) {
-        buff.append("id: ").append(/*System.identityHashCode(this)*/id).append('\n');
+//        buff.append("id: ").append(id).append('\n');
+        buff.append("id: ").append(System.identityHashCode(this)).append('\n');
         buff.append("pos: ").append(Long.toHexString(pos)).append('\n');
         if (isSaved()) {
             int chunkId = DataUtils.getPageChunkId(pos);
@@ -428,7 +429,7 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
     public final Page copy() {
         Page newPage = clone();
         newPage.pos = 0;
-        newPage.id = map.store.idGenerator.incrementAndGet();
+//        newPage.id = map.store.idGenerator.incrementAndGet();
         return newPage;
     }
 
@@ -648,7 +649,7 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
     private void read(ByteBuffer buff, int chunkId) {
         int pageLength = buff.remaining() + 10;  // size of int + short + varint, since we've read page length, check and mapId already
         int len = DataUtils.readVarInt(buff);
-        id = DataUtils.readVarLong(buff);
+//        id = DataUtils.readVarLong(buff);
         keys = createKeyStorage(len);
         int type = buff.get();
         if(isLeaf() != ((type & 1) == PAGE_TYPE_LEAF)) {
@@ -719,7 +720,9 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
         buff.putInt(0).
             putShort((byte) 0).
             putVarInt(map.getId()).
-            putVarInt(len).putVarLong(id);
+            putVarInt(len)
+//           .putVarLong(id)
+        ;
         int typePos = buff.position();
         buff.put((byte) type);
         writeChildren(buff, true);
@@ -782,8 +785,8 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
         if (!isDeleted) {
             chunk.maxLenLive += max;
             chunk.pageCountLive++;
-            assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.put(pos, getMapId()) == null;
-            assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.size() == chunk.pageCountLive;
+//            assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.put(pos, getMapId()) == null;
+//            assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.size() == chunk.pageCountLive;
         }
 //        assert map.pageIdToChunkId == null || map.pageIdToChunkId.put(id, chunk.id) != null;
         diskSpaceUsed = max != DataUtils.PAGE_LARGE ? max : pageLength;
@@ -1302,9 +1305,9 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
                 long pagePos = ref.getPos();
                 Page page = ref.getPage();
                 if (page == null ? DataUtils.isLeafPosition(pagePos) : page.isLeaf()) {
-                    if (page == null) {
-                        page = getChildPage(i);
-                    }
+//                    if (page == null) {
+//                        page = getChildPage(i);
+//                    }
                     visitor.visit(page, pagePos);
                 } else {
                     if (page == null) {

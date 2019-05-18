@@ -117,7 +117,13 @@ public final class RootReference
     }
 
     RootReference updateRootPage(Page page, long attemptCounter, VisitablePages removedPositions) {
-        return new RootReference(this, page, attemptCounter, removedPositions);
+        if (!lockedForUpdate) {
+            RootReference updatedRootReference = new RootReference(this, page, attemptCounter, removedPositions);
+            if (page.map.compareAndSetRoot(this, updatedRootReference)) {
+                return updatedRootReference;
+            }
+        }
+        return null;
     }
 
     RootReference markLocked(int attemptCounter) {
@@ -135,21 +141,23 @@ public final class RootReference
         return new RootReference(this, page, appendCounter, lockedForUpdate, removedPositions);
     }
 
-    void removeUnusedOldVersions(long oldest) {
+    void removeUnusedOldVersions(long oldestVersionToKeep) {
         // We need to keep at least one previous version (if any) here,
         // because in order to retain whole history of some version
         // we really need last root of the previous version.
         // Root labeled with version "X" is the LAST known root for that version
         // and therefore the FIRST known root for the version "X+1"
         for(RootReference rootRef = this; rootRef != null; rootRef = rootRef.previous) {
-            if (rootRef.version < oldest) {
+            if (rootRef.version < oldestVersionToKeep) {
+                RootReference previous;
+                assert (previous = rootRef.previous) == null || previous.getAppendCounter() == 0 : oldestVersionToKeep + " " + rootRef.previous;
                 rootRef.previous = null;
             }
         }
     }
 
     long getVersion() {
-        RootReference prev = this.previous;
+        RootReference prev = previous;
         return prev == null || prev.root != root ||
                 prev.appendCounter != appendCounter ?
                     version : prev.version;

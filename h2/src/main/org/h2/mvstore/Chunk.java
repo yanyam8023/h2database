@@ -116,7 +116,7 @@ public class Chunk {
      */
     public long next;
 
-    public Map<Long,Integer> pagePosToMapId = Collections.synchronizedMap(new HashMap<Long,Integer>());
+//    public Map<Long,Integer> pagePosToMapId = Collections.synchronizedMap(new HashMap<Long,Integer>());
 
     Chunk(int id) {
         this.id = id;
@@ -206,7 +206,7 @@ public class Chunk {
         c.unusedAtVersion = DataUtils.readHexLong(map, "unusedAtVersion", 0);
         c.version = DataUtils.readHexLong(map, "version", id);
         c.next = DataUtils.readHexLong(map, "next", 0);
-        c.pagePosToMapId = null;
+//        c.pagePosToMapId = null;
         return c;
     }
 

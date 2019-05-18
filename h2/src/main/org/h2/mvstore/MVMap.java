@@ -66,7 +66,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
     private boolean readOnly;
     private boolean isVolatile;
 
-    public Map<Long,Integer> pageIdToChunkId;
+//    public Map<Long,Integer> pageIdToChunkId;
 
     /**
      * This designates the "last stored" version for a store which was
@@ -113,9 +113,9 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         this.keysBuffer = singleWriter ? (K[]) new Object[keysPerPage] : null;
         this.valuesBuffer = singleWriter ? (V[]) new Object[keysPerPage] : null;
         this.singleWriter = singleWriter;
-        if (id == 2) {
-            pageIdToChunkId = Collections.synchronizedMap(new HashMap<Long,Integer>());
-        }
+//        if (id == 2) {
+//            pageIdToChunkId = Collections.synchronizedMap(new HashMap<Long,Integer>());
+//        }
     }
 
     /**
@@ -444,6 +444,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
             rootReference = flushAndGetRoot(preLocked);
             Page page = rootReference.root;
             long version = rootReference.version;
+/*
             final HashSet<Long> pageIds = new HashSet<>();
             if (id == 2) {
                 assert version >= 0;
@@ -454,7 +455,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                     }
                 });
             }
-
+*/
             if (preLocked) {
                 RootReference updatedRootReference = rootReference.updatePageAndLockedStatus(emptyRootPage,
                                                                     rootReference.getAppendCounter(), preLocked, page);
@@ -467,10 +468,11 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 rootReference = getUpdatedRoot(rootReference, emptyRootPage, ++attempt, page);
             }
             if (rootReference != null) {
-                IntValueHolder unsavedMemoryHolder = new IntValueHolder();
-                rootReference.updateRemovalInfoData(shrinkRemovalInfo(page, unsavedMemoryHolder, version));
-                store.registerUnsavedPage(unsavedMemoryHolder.value);
-//                store.registerUnsavedPage(-calculateUnsavedMemoryAdjustment(page));
+//                IntValueHolder unsavedMemoryHolder = new IntValueHolder();
+//                rootReference.updateRemovalInfoData(shrinkRemovalInfo(page, unsavedMemoryHolder, version));
+//                store.registerUnsavedPage(unsavedMemoryHolder.value);
+                store.registerUnsavedPage(-calculateUnsavedMemoryAdjustment(page));
+/*
                 if (id == 2) {
                     page.visitPages(new Page.Visitor() {
                         @Override
@@ -481,6 +483,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                     assert pageIds.isEmpty();
                     pageIdToChunkId.clear();
                 }
+*/
             }
         } while (rootReference == null);
         return rootReference;
@@ -743,21 +746,17 @@ public class MVMap<K, V> extends AbstractMap<K, V>
             return rewrite(getRootPage(), set);
         }
         RootReference rootReference = lockRoot(getRoot(), 1);
-//        int appendCounter = rootReference.getAppendCounter();
+        int appendCounter = rootReference.getAppendCounter();
         try {
-//            if (appendCounter > 0) {
-//                rootReference = flushAppendBuffer(rootReference, true, true);
-//                assert rootReference.getAppendCounter() == 0;
-//            }
-            if (id == 2 && set.contains(3)) {
-                assert pageIdToChunkId != null;
+            if (appendCounter > 0) {
+                rootReference = flushAppendBuffer(rootReference, true, true);
+                assert rootReference.getAppendCounter() == 0;
             }
             int res = rewrite(rootReference.root, set);
             return res;
         } finally {
             unlockRoot();
         }
-
     }
 
     private int rewrite(Page p, Set<Integer> set) {
@@ -958,6 +957,10 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         root.set(new RootReference(rootPage, version));
     }
 
+    final boolean compareAndSetRoot(RootReference expectedRootReference, RootReference updatedRootReference) {
+        return root.compareAndSet(expectedRootReference, updatedRootReference);
+    }
+
     /**
      * Rollback to the given version.
      *
@@ -1006,13 +1009,8 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                                        int attemptUpdateCounter, RootReference.VisitablePages removedPositions)
     {
         RootReference currentRoot = flushAndGetRoot();
-        if (currentRoot == expectedRootReference && !currentRoot.lockedForUpdate) {
-            RootReference updatedRoot = currentRoot.updateRootPage(newRootPage, attemptUpdateCounter, removedPositions);
-            if (root.compareAndSet(currentRoot, updatedRoot)) {
-                return updatedRoot;
-            }
-        }
-        return null;
+        return currentRoot != expectedRootReference ? null :
+                currentRoot.updateRootPage(newRootPage, attemptUpdateCounter, removedPositions);
     }
 
     /**
@@ -1354,7 +1352,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
 
                 Page rootPage = rootReference.root;
                 long version = rootReference.version;
-
+/*
                 final HashSet<Long> pageIds = new HashSet<>();
                 if (id == 2) {
                     rootPage.visitPages(new Page.Visitor() {
@@ -1364,7 +1362,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                         }
                     });
                 }
-
+*/
                 CursorPos pos = rootPage.getAppendCursorPos(null);
                 assert pos != null;
                 assert pos.index < 0 : pos.index;
@@ -1454,6 +1452,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
 //                            unsavedMemoryHolder.value -= tip.calculateUnsavedMemoryAdjustment();
                         }
                         store.registerUnsavedPage(unsavedMemoryHolder.value);
+/*
                         if (id == 2) {
                             p.visitPages(new Page.Visitor() {
                                 @Override
@@ -1471,6 +1470,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                             }
                             assert pageIds.isEmpty();
                         }
+*/
                     }
                     assert lockedForUpdate || updatedRootReference.getAppendCounter() == 0;
                     return updatedRootReference;
@@ -1556,11 +1556,14 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 unlockRoot(rootReference.root, appendCounter);
             }
             if (useRegularRemove) {
+                rootReference = lockRoot(rootReference, 1);
                 Page lastLeaf = rootReference.root.getAppendCursorPos(null).page;
                 assert lastLeaf.isLeaf();
                 assert lastLeaf.getKeyCount() > 0;
                 Object key = lastLeaf.getKey(lastLeaf.getKeyCount() - 1);
-                remove(key);
+                operate((K)key, null, DecisionMaker.REMOVE, true);
+//                remove(key);
+                unlockRoot();
             }
         }
     }
@@ -1878,7 +1881,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
             }
             Page rootPage = rootReference.root;
             long version = rootReference.version;
-
+/*
             final HashSet<Long> pageIds = new HashSet<>();
             if (id == 2) {
                 rootPage.visitPages(new Page.Visitor() {
@@ -1888,7 +1891,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                     }
                 });
             }
-
+*/
             CursorPos tip;
             V result;
             unsavedMemoryHolder.value = 0;
@@ -2010,6 +2013,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
 //                    tip.dropSavedDeletedPages(unsavedMemoryHolder, version);
 //                    unsavedMemoryHolder.value -= tip.calculateUnsavedMemoryAdjustment();
                     store.registerUnsavedPage(unsavedMemoryHolder.value);
+/*
                     if (id == 2) {
                         rootPage.visitPages(new Page.Visitor() {
                             @Override
@@ -2025,6 +2029,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                         });
                         assert pageIds.isEmpty();
                     }
+*/
                 }
                 return result;
             } finally {

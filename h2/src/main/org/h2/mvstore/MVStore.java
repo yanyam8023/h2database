@@ -301,7 +301,7 @@ public class MVStore implements AutoCloseable {
     /**
      * The version of the current store operation (if any).
      */
-    private volatile long currentStoreVersion = -1;
+    volatile long currentStoreVersion = -1;
 
     private volatile boolean metaChanged;
 
@@ -317,7 +317,7 @@ public class MVStore implements AutoCloseable {
 
     private long lastTimeAbsolute;
 
-    final AtomicLong idGenerator = new AtomicLong();
+//    final AtomicLong idGenerator = new AtomicLong();
 
     /**
      * Create and open the store.
@@ -2133,19 +2133,14 @@ public class MVStore implements AutoCloseable {
         sync();
 
         int rewritedPageCount = 0;
-//        for (MVMap<?, ?> m : maps.values()) {
-//            @SuppressWarnings("unchecked")
-//            MVMap<Object, Object> map = (MVMap<Object, Object>) m;
+//        for (MVMap<?, ?> map : maps.values()) {
 //            if (!map.isClosed() && map.isSingleWriter()) {
 //                rewritedPageCount += map.rewrite(set);
 //            }
 //        }
-
 //        storeLock.unlock();
 //        try {
-            for (MVMap<?, ?> m : maps.values()) {
-                @SuppressWarnings("unchecked")
-                MVMap<Object, Object> map = (MVMap<Object, Object>) m;
+            for (MVMap<?, ?> map : maps.values()) {
                 if (!map.isClosed() /*&& !map.isSingleWriter()*/) {
                     rewritedPageCount += map.rewrite(set);
                 }
@@ -2166,7 +2161,7 @@ public class MVStore implements AutoCloseable {
     private boolean validateRewrite(Set<Integer> set) {
         for (Integer chunkId : set) {
             Chunk chunk = chunks.get(chunkId);
-            assert chunk == null || chunk.pageCountLive == 0 : chunk + " " + chunk.pagePosToMapId;
+            assert chunk == null || chunk.pageCountLive == 0 : chunk /*+ " " + chunk.pagePosToMapId*/;
         }
         return true;
     }
@@ -2218,12 +2213,13 @@ public class MVStore implements AutoCloseable {
                 chunk.pageCountLive--;
 
                 assert chunk.pageCountLive >= 0 : chunk;
-                assert chunk.maxLenLive >= 0 : chunk;
-                assert (chunk.pageCountLive == 0) == (chunk.maxLenLive == 0) : chunk;
-                assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.remove(pagePos) != null
-                        : chunk + " " + pagePos + " " + chunk.pagePosToMapId;
+//                assert chunk.maxLenLive >= 0 : chunk;
+//                assert (chunk.pageCountLive == 0) == (chunk.maxLenLive == 0) : chunk;
 
-                if (chunk.pageCountLive == 0 && chunk.maxLenLive == 0) {
+//                assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.remove(pagePos) != null
+//                        : chunk + " " + pagePos + " " + chunk.pagePosToMapId;
+
+                if (chunk.pageCountLive == 0 /*&& chunk.maxLenLive == 0*/) {
                     chunk.unusedAtVersion = version;
                     if (time == 0) {
                         time = getTimeSinceCreation();

@@ -41,17 +41,17 @@ public class CursorPos implements RootReference.VisitablePages
     public void visitPages(Page.Visitor visitor) {
         for (CursorPos head = this; head != null; head = head.parent) {
             Page page = head.page;
-            if (page != null) {
+//            if (page != null) {
                 if (page.getTotalCount() > 0 || !page.isLeaf()) {
                     long pagePos = page.getPos();
                     visitor.visit(page, pagePos);
                 }
-            } else {
-                int chunkId = head.index >>> 5;
-                int length = DataUtils.getPageMaxLength(head.index << 1);
-                long pagePos = DataUtils.getPagePos(chunkId, 0, length, 0);
-                visitor.visit(null, pagePos);
-            }
+//            } else {
+//                int chunkId = head.index >>> 5;
+//                int length = DataUtils.getPageMaxLength(head.index << 1);
+//                long pagePos = DataUtils.getPagePos(chunkId, 0, length, 0);
+//                visitor.visit(null, pagePos);
+//            }
         }
     }
 
@@ -82,7 +82,18 @@ public class CursorPos implements RootReference.VisitablePages
             Page page = head.page;
             long pagePos = page.getPos();
             if (DataUtils.isPageSaved(pagePos) && DataUtils.getPageChunkId(pagePos) <= version) {
-                positions[count++] = pagePos;
+                try {
+                    positions[count++] = pagePos;
+                } catch (ArrayIndexOutOfBoundsException e) {
+                    System.err.println(DataUtils.getPageChunkId(pagePos) + " <= " + version +
+                          ", lastStoredVersion=" + page.map.store.getLastStoredVersion() +
+                          ", currentVersion=" + page.map.store.getCurrentVersion() +
+                          ", lastChunkId=" + page.map.store.getLastChunkId() +
+                          ", currentStoreVersion=" + page.map.store.currentStoreVersion +
+                          ""
+                    );
+                    throw e;
+                }
             }
         }
 
