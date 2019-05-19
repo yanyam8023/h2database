@@ -77,26 +77,18 @@ public class CursorPos implements RootReference.VisitablePages
             return null;
         }
         final long[] positions = new long[count];
-        count = 0;
         for (CursorPos head = this; head != null; head = head.parent) {
             Page page = head.page;
             long pagePos = page.getPos();
             if (DataUtils.isPageSaved(pagePos) && DataUtils.getPageChunkId(pagePos) <= version) {
-                try {
-                    positions[count++] = pagePos;
-                } catch (ArrayIndexOutOfBoundsException e) {
-                    System.err.println(DataUtils.getPageChunkId(pagePos) + " <= " + version +
-                          ", lastStoredVersion=" + page.map.store.getLastStoredVersion() +
-                          ", currentVersion=" + page.map.store.getCurrentVersion() +
-                          ", lastChunkId=" + page.map.store.getLastChunkId() +
-                          ", currentStoreVersion=" + page.map.store.currentStoreVersion +
-                          ""
-                    );
-                    throw e;
+                if (--count < 0) {
+                    assert page.map.store.getCurrentVersion() > version ||
+                            version >= page.map.store.getLastStoredVersion() + 1;
+                    return this;
                 }
+                positions[count] = pagePos;
             }
         }
-
         return new RootReference.RemovalInfo(positions);
     }
 

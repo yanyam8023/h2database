@@ -468,10 +468,15 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 rootReference = getUpdatedRoot(rootReference, emptyRootPage, ++attempt, page);
             }
             if (rootReference != null) {
-//                IntValueHolder unsavedMemoryHolder = new IntValueHolder();
-//                rootReference.updateRemovalInfoData(shrinkRemovalInfo(page, unsavedMemoryHolder, version));
-//                store.registerUnsavedPage(unsavedMemoryHolder.value);
-                store.registerUnsavedPage(-calculateUnsavedMemoryAdjustment(page));
+                if (store.getCurrentVersion() == version && version == store.getLastStoredVersion() + 1) {
+//                    store.registerUnsavedPage(-calculateUnsavedMemoryAdjustment(page));
+                    IntValueHolder unsavedMemoryHolder = new IntValueHolder();
+                    RootReference.VisitablePages removalInfo = shrinkRemovalInfo(page, unsavedMemoryHolder, version);
+                    if (store.getCurrentVersion() == version && version == store.getLastStoredVersion() + 1) {
+                        rootReference.updateRemovalInfoData(removalInfo);
+                        store.registerUnsavedPage(unsavedMemoryHolder.value);
+                    }
+                }
 /*
                 if (id == 2) {
                     page.visitPages(new Page.Visitor() {
@@ -489,19 +494,19 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         return rootReference;
     }
 
-    private RootReference.VisitablePages shrinkRemovalInfo(Page page, final MVMap.IntValueHolder unsavedMemoryHolder,
+    private RootReference.VisitablePages shrinkRemovalInfo(final Page rootPage, final MVMap.IntValueHolder unsavedMemoryHolder,
                                                            final long version) {
-//        final IntValueHolder countHolder = new IntValueHolder();
-        final ArrayList<Long> list = new ArrayList<>();
-        page.visitPages(new Page.Visitor() {
+        final IntValueHolder countHolder = new IntValueHolder();
+//        final ArrayList<Long> list = new ArrayList<>();
+        rootPage.visitPages(new Page.Visitor() {
             @Override
             public void visit(Page page, long pagePos) {
 //                assert !DataUtils.isPageSaved(pagePos) ||
 //                        store.chunks.get(DataUtils.getPageChunkId(pagePos)).version == DataUtils.getPageChunkId(pagePos)
 //                        : store.chunks.get(DataUtils.getPageChunkId(pagePos)).version +" <> "+ DataUtils.getPageChunkId(pagePos);
                 if (DataUtils.isPageSaved(pagePos) && DataUtils.getPageChunkId(pagePos) <= version) {
-                    list.add(pagePos);
-//                    ++countHolder.value;
+//                    list.add(pagePos);
+                    ++countHolder.value;
                 } else {
 //                    assert page != null : DataUtils.getPageChunkId(pagePos) + " " + lastChunkId;
 //                    assert page.getPos() == pagePos || DataUtils.getPageChunkId(page.getPos()) > lastChunkId: page.getPos() + " <> " + pagePos + " " + DataUtils.getPageChunkId(page.getPos()) + " " + lastChunkId;
@@ -511,37 +516,40 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                             unsavedMemoryHolder.value -= page.getMemory();
                         } else if (DataUtils.getPageChunkId(page.getPos()) <= version) {
                             assert DataUtils.isPageSaved(page.getPos());
-                            list.add(pagePos);
-//                            ++countHolder.value;
+//                            list.add(pagePos);
+                            ++countHolder.value;
                         }
                     } else {
-                        list.add(pagePos);
-//                        ++countHolder.value;
+//                        list.add(pagePos);
+                        ++countHolder.value;
                     }
                 }
             }
         });
-//        if (countHolder.value == 0) {
-        if (list.isEmpty()) {
+//        if (list.isEmpty()) {
+        if (countHolder.value == 0) {
             return null;
         }
-        long[] positions = new long[list.size()];
-        for (int i = 0; i < positions.length; i++) {
-            positions[i] = list.get(i);
-        }
-/*
+//        long[] positions = new long[list.size()];
+//        for (int i = 0; i < positions.length; i++) {
+//            positions[i] = list.get(i);
+//        }
         final long[] positions = new long[countHolder.value];
-        page.visitPages(new Page.Visitor() {
-            private int index;
+        rootPage.visitPages(new Page.Visitor() {
+            private int count = countHolder.value;
             @Override
             public void visit(Page page, long pagePos) {
                 if ((page == null || page.getTotalCount() > 0) && DataUtils.isPageSaved(pagePos) && DataUtils.getPageChunkId(pagePos) <= version) {
                     assert page == null || page.getPos() == pagePos : page.getPos() + " <> " + pagePos + " " + DataUtils.getPageChunkId(page.getPos()) + " " + version;
-                    positions[index++] = pagePos;
+                    if (--count >= 0) {
+                        positions[count] = pagePos;
+                    } else {
+                        assert store.getCurrentVersion() > version ||
+                                version >= store.getLastStoredVersion() + 1;
+                    }
                 }
             }
         });
-*/
 
         return new RootReference.RemovalInfo(positions);
     }
@@ -1446,12 +1454,19 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 if (root.compareAndSet(rootReference, updatedRootReference)) {
                     lockedRootReference = null;
                     if (isPersistent()) {
-                        if (tip != null) {
-                            updatedRootReference.updateRemovalInfoData(tip.shrinkRemovalInfo(unsavedMemoryHolder, version));
-//                            tip.dropSavedDeletedPages(unsavedMemoryHolder, version);
-//                            unsavedMemoryHolder.value -= tip.calculateUnsavedMemoryAdjustment();
+                        if (store.getCurrentVersion() == version && version == store.getLastStoredVersion() + 1) {
+                            if (tip != null) {
+//                                tip.dropSavedDeletedPages(unsavedMemoryHolder, version);
+//                                unsavedMemoryHolder.value -= tip.calculateUnsavedMemoryAdjustment();
+                                store.registerUnsavedPage(unsavedMemoryHolder.value);
+                                unsavedMemoryHolder.value = 0;
+                                RootReference.VisitablePages removalInfo = tip.shrinkRemovalInfo(unsavedMemoryHolder, version);
+                                if (store.getCurrentVersion() == version && version == store.getLastStoredVersion() + 1) {
+                                    updatedRootReference.updateRemovalInfoData(removalInfo);
+                                    store.registerUnsavedPage(unsavedMemoryHolder.value);
+                                }
+                            }
                         }
-                        store.registerUnsavedPage(unsavedMemoryHolder.value);
 /*
                         if (id == 2) {
                             p.visitPages(new Page.Visitor() {
@@ -2009,10 +2024,18 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                     lockedRootReference = null;
                 }
                 if (isPersistent()) {
-                    updatedRootReference.updateRemovalInfoData(tip.shrinkRemovalInfo(unsavedMemoryHolder, version));
-//                    tip.dropSavedDeletedPages(unsavedMemoryHolder, version);
-//                    unsavedMemoryHolder.value -= tip.calculateUnsavedMemoryAdjustment();
-                    store.registerUnsavedPage(unsavedMemoryHolder.value);
+                    if (store.getCurrentVersion() == version && version == store.getLastStoredVersion() + 1) {
+//                        tip.dropSavedDeletedPages(unsavedMemoryHolder, version);
+//                        unsavedMemoryHolder.value -= tip.calculateUnsavedMemoryAdjustment();
+                        store.registerUnsavedPage(unsavedMemoryHolder.value);
+                        unsavedMemoryHolder.value = 0;
+                        RootReference.VisitablePages removalInfo = tip.shrinkRemovalInfo(unsavedMemoryHolder, version);
+                        if (store.getCurrentVersion() == version && version == store.getLastStoredVersion() + 1) {
+                            store.registerUnsavedPage(unsavedMemoryHolder.value);
+                            updatedRootReference.updateRemovalInfoData(removalInfo);
+                        }
+                    }
+
 /*
                     if (id == 2) {
                         rootPage.visitPages(new Page.Visitor() {
