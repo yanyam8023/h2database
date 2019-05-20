@@ -2138,8 +2138,8 @@ public class MVStore implements AutoCloseable {
 //                rewritedPageCount += map.rewrite(set);
 //            }
 //        }
-//        storeLock.unlock();
-//        try {
+        storeLock.unlock();
+        try {
             for (MVMap<?, ?> map : maps.values()) {
                 if (!map.isClosed() /*&& !map.isSingleWriter()*/) {
                     rewritedPageCount += map.rewrite(set);
@@ -2150,9 +2150,9 @@ public class MVStore implements AutoCloseable {
                 markMetaChanged();
                 rewritedPageCount += rewriteMetaCount;
             }
-//        } finally {
-//            storeLock.lock();
-//        }
+        } finally {
+            storeLock.lock();
+        }
         commit();
         assert validateRewrite(set);
         return rewritedPageCount;

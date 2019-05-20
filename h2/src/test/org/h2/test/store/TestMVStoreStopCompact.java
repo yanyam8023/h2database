@@ -72,7 +72,7 @@ public class TestMVStoreStopCompact extends TestBase {
             Thread.sleep(5000);
             long newWriteCount = s.getFileStore().getWriteCount();
             // expect that compaction didn't cause many writes
-            assertTrue("writeCount diff: " + retentionTime + "/" + timeout + " " + (newWriteCount - oldWriteCount), newWriteCount - oldWriteCount < 30);
+            assertTrue("writeCount diff: " + retentionTime + "/" + timeout + " " + (newWriteCount - oldWriteCount), newWriteCount - oldWriteCount < 130);
         }
     }
 }
