@@ -32,6 +32,12 @@ public class FreeSpaceBitSet {
     private final BitSet set = new BitSet();
 
     /**
+     * Last allocations failures
+     */
+    private int failureFlags;
+
+
+    /**
      * Create a new free space map.
      *
      * @param firstFreeBlock the first free block
@@ -103,8 +109,12 @@ public class FreeSpaceBitSet {
      * @param length the number of bytes to allocate
      * @return the start position in bytes
      */
-    public long predictAllocation(int length) {
+    long predictAllocation(int length) {
         return allocate(length, false);
+    }
+
+    boolean isFragmented() {
+        return Integer.bitCount(failureFlags & 0x0F) > 1;
     }
 
     private long allocate(int length, boolean allocate) {
@@ -117,6 +127,10 @@ public class FreeSpaceBitSet {
                         "Double alloc: " + Integer.toHexString(start) + "/" + Integer.toHexString(blocks) + " " + this;
                 if (allocate) {
                     set.set(start, start + blocks);
+                }
+                failureFlags <<= 1;
+                if (end < 0) {
+                    failureFlags |= 1;
                 }
                 return getPos(start);
             }

@@ -83,6 +83,7 @@ public final class RootReference
         this.previous = r.previous;
         this.updateCounter = r.updateCounter + 1;
         this.updateAttemptCounter = r.updateAttemptCounter + attempt;
+        assert !r.lockedForUpdate;
         this.lockedForUpdate = true;
         this.appendCounter = r.appendCounter;
         this.removalInfo = r.removalInfo;
@@ -96,6 +97,7 @@ public final class RootReference
         this.previous = r.previous;
         this.updateCounter = r.updateCounter;
         this.updateAttemptCounter = r.updateAttemptCounter;
+        assert r.lockedForUpdate;
         this.lockedForUpdate = lockedForUpdate;
         this.appendCounter = (byte) appendCounter;
         this.removalInfo = removedPositions == null ? r.removalInfo :
@@ -103,16 +105,15 @@ public final class RootReference
     }
 
     // This one is used for version change
-    private RootReference(RootReference r, RootReference previous, long version, int attempt) {
+    private RootReference(RootReference r, long version, int attempt) {
         this.root = r.root;
         this.version = version;
-        this.previous = previous;
+        this.previous = r;
         this.updateCounter = r.updateCounter + 1;
         this.updateAttemptCounter = r.updateAttemptCounter + attempt;
-        assert !previous.lockedForUpdate;
         this.lockedForUpdate = false;
-//        this.lockedForUpdate = r.lockedForUpdate;
-        this.appendCounter = r.appendCounter;
+        assert r.appendCounter == 0;
+        this.appendCounter = 0;
         this.removalInfo = null;
     }
 
@@ -126,15 +127,18 @@ public final class RootReference
         return null;
     }
 
-    RootReference markLocked(int attemptCounter) {
-        return new RootReference(this, attemptCounter);
+    RootReference tryLock(int attemptCounter) {
+        if (!lockedForUpdate) {
+            RootReference lockedRootReference = new RootReference(this, attemptCounter);
+            if (root.map.compareAndSetRoot(this, lockedRootReference)) {
+                return lockedRootReference;
+            }
+        }
+        return null;
     }
 
-    RootReference unlockAndUpdateVersion(RootReference previous, long version, int attempt) {
-        if (previous.lockedForUpdate) {
-            previous = new RootReference(previous, previous.root, previous.getAppendCounter(), false, null);
-        }
-        return new RootReference(this, previous, version, attempt);
+    RootReference unlockAndUpdateVersion(long version, int attempt) {
+        return new RootReference(this, version, attempt);
     }
 
     RootReference updatePageAndLockedStatus(Page page, int appendCounter, boolean lockedForUpdate, VisitablePages removedPositions) {

@@ -8,11 +8,7 @@ package org.h2.mvstore;
 import java.util.AbstractList;
 import java.util.AbstractMap;
 import java.util.AbstractSet;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -436,7 +432,8 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         }
     }
 
-    RootReference clearIt(boolean preLocked) {
+    private RootReference clearIt(boolean preLocked) {
+        assert !singleWriter || preLocked || !getRoot().lockedForUpdate;
         RootReference rootReference;
         Page emptyRootPage = createEmptyLeaf();
         int attempt = 0;
@@ -465,6 +462,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 }
                 rootReference = updatedRootReference;
             } else {
+                assert !singleWriter || !getRoot().lockedForUpdate;
                 rootReference = getUpdatedRoot(rootReference, emptyRootPage, ++attempt, page);
             }
             if (rootReference != null) {
@@ -1247,7 +1245,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
             }
 
             RootReference lockedRootReference = null;
-            if ((++attempt > 3 || rootReference.lockedForUpdate)) {
+            if (++attempt > 3 || rootReference.lockedForUpdate) {
                 lockedRootReference = lockRoot(rootReference, attempt);
                 rootReference = flushAndGetRoot(true);
             }
@@ -1258,7 +1256,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 while ((tmp = previous.previous) != null && tmp.root == rootReference.root) {
                     previous = tmp;
                 }
-                RootReference updatedRootReference = rootReference.unlockAndUpdateVersion(previous, writeVersion, attempt);
+                RootReference updatedRootReference = previous.unlockAndUpdateVersion(writeVersion, attempt);
                 if (root.compareAndSet(rootReference, updatedRootReference)) {
                     lockedRootReference = null;
                     if (clearRemovalInfo) {
@@ -1337,15 +1335,15 @@ public class MVMap<K, V> extends AbstractMap<K, V>
      * If map was used in append mode, this method will ensure that append buffer
      * is flushed - emptied with all entries inserted into map as a new leaf.
      * @param rootReference current RootReference
-     * @param lockedForUpdate whether rootReference is pre-locked already and
+     * @param preLocked whether rootReference is locked by this caller already and
      *                       should stay locked upon return
      * @param fullFlush whether buffer should be completely flushed,
      *                 otherwise just a single empty slot is required
      * @return potentially updated RootReference
      */
-    private RootReference flushAppendBuffer(RootReference rootReference, boolean lockedForUpdate, boolean fullFlush) {
+    private RootReference flushAppendBuffer(RootReference rootReference, boolean preLocked, boolean fullFlush) {
         IntValueHolder unsavedMemoryHolder = new IntValueHolder();
-        RootReference lockedRootReference = lockedForUpdate ? rootReference : null;
+        RootReference lockedRootReference = preLocked ? rootReference : null;
         int keysPerPage = store.getKeysPerPage();
         try {
             int attempt = 0;
@@ -1450,7 +1448,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 }
                 p = replacePage(pos, p, unsavedMemoryHolder);
                 RootReference updatedRootReference = rootReference.updatePageAndLockedStatus(p, remainingBuffer,
-                                                                        lockedForUpdate, isPersistent() ? tip : null);
+                                                                        preLocked, isPersistent() ? tip : null);
                 if (root.compareAndSet(rootReference, updatedRootReference)) {
                     lockedRootReference = null;
                     if (isPersistent()) {
@@ -1487,13 +1485,13 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                         }
 */
                     }
-                    assert lockedForUpdate || updatedRootReference.getAppendCounter() == 0;
+                    assert updatedRootReference.getAppendCounter() <= availabilityThreshold;
                     return updatedRootReference;
                 }
                 rootReference = getRoot();
             }
         } finally {
-            if (lockedRootReference != null && !lockedForUpdate) {
+            if (lockedRootReference != null && !preLocked) {
                 assert rootReference.root == lockedRootReference.root;
                 rootReference = unlockRoot();
             }
@@ -1882,6 +1880,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
 
     @SuppressWarnings("unchecked")
     private V operate(K key, V value, DecisionMaker<? super V> decisionMaker, boolean preLocked) {
+        assert !singleWriter || preLocked || !getRoot().lockedForUpdate;
         beforeWrite();
         IntValueHolder unsavedMemoryHolder = new IntValueHolder();
         int attempt = 0;
@@ -1889,7 +1888,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
             RootReference rootReference = flushAndGetRoot(preLocked);
             RootReference lockedRootReference = null;
             if (!preLocked) {
-                if ((++attempt > 3 || rootReference.lockedForUpdate)) {
+                if (++attempt > 3 || rootReference.lockedForUpdate) {
                     lockedRootReference = lockRoot(rootReference, attempt);
                     rootReference = lockedRootReference;
                 }
@@ -2074,11 +2073,9 @@ public class MVMap<K, V> extends AbstractMap<K, V>
     }
 
     private RootReference tryLock(RootReference rootReference, int attempt) {
-        if (!rootReference.lockedForUpdate) {
-            RootReference lockedRootReference = rootReference.markLocked(attempt);
-            if (root.compareAndSet(rootReference, lockedRootReference)) {
-                return lockedRootReference;
-            }
+        RootReference lockedRootReference = rootReference.tryLock(attempt);
+        if (rootReference != null) {
+            return lockedRootReference;
         }
 
         RootReference oldRootReference = rootReference.previous;

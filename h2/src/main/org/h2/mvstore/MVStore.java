@@ -2777,7 +2777,9 @@ public class MVStore implements AutoCloseable {
             if (time > lastCommitTime + autoCommitDelay) {
                 tryCommit();
             }
-            doMaintance();
+            if (fileStore.isFragmented()) {
+                doMaintance();
+            }
 /*
             if (autoCompactFillRate > 0) {
                 // whether there were file read or write operations since
