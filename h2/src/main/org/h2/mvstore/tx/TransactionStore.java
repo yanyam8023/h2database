@@ -620,7 +620,7 @@ public class TransactionStore {
                 RollbackDecisionMaker decisionMaker = new RollbackDecisionMaker(TransactionStore.this, transactionId, toLogId, t.listener);
                 for (long logId = maxLogId - 1; logId >= toLogId; logId--) {
                     Long undoKey = getOperationId(transactionId, logId);
-                    undoLog.operate(undoKey, null, decisionMaker);
+                    undoLog.operate(undoKey, null, decisionMaker, true);
                     decisionMaker.reset();
                 }
             }

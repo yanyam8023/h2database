@@ -1884,7 +1884,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
     }
 
     @SuppressWarnings("unchecked")
-    private V operate(K key, V value, DecisionMaker<? super V> decisionMaker, boolean preLocked) {
+    public V operate(K key, V value, DecisionMaker<? super V> decisionMaker, boolean preLocked) {
         assert !singleWriter || preLocked || !getRoot().lockedForUpdate;
         beforeWrite();
         IntValueHolder unsavedMemoryHolder = new IntValueHolder();
