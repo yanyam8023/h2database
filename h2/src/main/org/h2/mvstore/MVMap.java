@@ -424,7 +424,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         if (!singleWriter) {
             return clearIt(false);
         }
-        RootReference rootReference = lockRoot(getRoot(), 1);
+        lockRoot(getRoot(), 1);
         try {
             return clearIt(true);
         } finally {
@@ -1542,7 +1542,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 valuesBuffer[appendCounter] = value;
                 ++appendCounter;
             } finally {
-                unlockRoot(rootReference.root, appendCounter);
+                unlockRoot(appendCounter);
             }
         }
     }
@@ -1561,22 +1561,27 @@ public class MVMap<K, V> extends AbstractMap<K, V>
             boolean useRegularRemove = appendCounter == 0;
             if (!useRegularRemove) {
                 rootReference = lockRoot(rootReference, 1);
-                appendCounter = rootReference.getAppendCounter();
-                useRegularRemove = appendCounter == 0;
-                if (!useRegularRemove) {
-                    --appendCounter;
+                try {
+                    appendCounter = rootReference.getAppendCounter();
+                    useRegularRemove = appendCounter == 0;
+                    if (!useRegularRemove) {
+                        --appendCounter;
+                    }
+                } finally {
+                    unlockRoot(appendCounter);
                 }
-                unlockRoot(rootReference.root, appendCounter);
             }
             if (useRegularRemove) {
                 rootReference = lockRoot(rootReference, 1);
-                Page lastLeaf = rootReference.root.getAppendCursorPos(null).page;
-                assert lastLeaf.isLeaf();
-                assert lastLeaf.getKeyCount() > 0;
-                Object key = lastLeaf.getKey(lastLeaf.getKeyCount() - 1);
-                operate((K)key, null, DecisionMaker.REMOVE, true);
-//                remove(key);
-                unlockRoot();
+                try {
+                    Page lastLeaf = rootReference.root.getAppendCursorPos(null).page;
+                    assert lastLeaf.isLeaf();
+                    assert lastLeaf.getKeyCount() > 0;
+                    Object key = lastLeaf.getKey(lastLeaf.getKeyCount() - 1);
+                    operate((K) key, null, DecisionMaker.REMOVE, true);
+                } finally {
+                    unlockRoot();
+                }
             }
         }
     }
@@ -2062,7 +2067,16 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         }
     }
 
-    private RootReference lockRoot(RootReference rootReference, int attempt) {
+    public void runUnderLockedRoot(Runnable action) {
+        lockRoot(flushAndGetRoot(), 1);
+        try {
+            action.run();
+        } finally {
+            unlockRoot();
+        }
+    }
+
+    RootReference lockRoot(RootReference rootReference, int attempt) {
         while(true) {
             RootReference lockedRootReference = tryLock(rootReference, attempt++);
             if (lockedRootReference != null) {
@@ -2074,7 +2088,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
 
     private RootReference tryLock(RootReference rootReference, int attempt) {
         RootReference lockedRootReference = rootReference.tryLock(attempt);
-        if (rootReference != null) {
+        if (lockedRootReference != null) {
             return lockedRootReference;
         }
 
@@ -2124,8 +2138,8 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         return unlockRoot(newRootPage, -1, removedPositions);
     }
 
-    private RootReference unlockRoot(Page newRootPage, int appendCounter) {
-        return unlockRoot(newRootPage, appendCounter, null);
+    private void unlockRoot(int appendCounter) {
+        unlockRoot(null, appendCounter, null);
     }
 
     private RootReference unlockRoot(Page newRootPage, int appendCounter, RootReference.VisitablePages removedPositions) {
