@@ -421,6 +421,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
     }
 
     RootReference clearIt() {
+/*
         if (!singleWriter) {
             return clearIt(false);
         }
@@ -434,11 +435,13 @@ public class MVMap<K, V> extends AbstractMap<K, V>
 
     private RootReference clearIt(boolean preLocked) {
         assert !singleWriter || preLocked || !getRoot().lockedForUpdate;
+*/
         RootReference rootReference;
         Page emptyRootPage = createEmptyLeaf();
         int attempt = 0;
         do {
-            rootReference = flushAndGetRoot(preLocked);
+//            rootReference = flushAndGetRoot(preLocked);
+            rootReference = flushAndGetRoot();
             Page page = rootReference.root;
             long version = rootReference.version;
 /*
@@ -453,18 +456,18 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 });
             }
 */
-            if (preLocked) {
-                RootReference updatedRootReference = rootReference.updatePageAndLockedStatus(emptyRootPage,
-                                                                    rootReference.getAppendCounter(), preLocked, page);
-                while (!root.compareAndSet(rootReference, updatedRootReference)) {
-                    assert rootReference != root.get();
-                    rootReference = root.get();
-                }
-                rootReference = updatedRootReference;
-            } else {
-                assert !singleWriter || !getRoot().lockedForUpdate;
+//            if (preLocked) {
+//                RootReference updatedRootReference = rootReference.updatePageAndLockedStatus(emptyRootPage,
+//                                                                    rootReference.getAppendCounter(), preLocked, page);
+//                while (!root.compareAndSet(rootReference, updatedRootReference)) {
+//                    assert rootReference != root.get();
+//                    rootReference = root.get();
+//                }
+//                rootReference = updatedRootReference;
+//            } else {
+//                assert !singleWriter || !getRoot().lockedForUpdate;
                 rootReference = getUpdatedRoot(rootReference, emptyRootPage, ++attempt, page);
-            }
+//            }
             if (rootReference != null) {
                 if (store.getCurrentVersion() == version && version == store.getLastStoredVersion() + 1) {
 //                    store.registerUnsavedPage(-calculateUnsavedMemoryAdjustment(page));
@@ -538,8 +541,12 @@ public class MVMap<K, V> extends AbstractMap<K, V>
             @Override
             public void visit(Page page, long pagePos) {
                 if ((page == null || page.getTotalCount() > 0) && DataUtils.isPageSaved(pagePos) && DataUtils.getPageChunkId(pagePos) <= version) {
-                    assert page == null || page.getPos() == pagePos : page.getPos() + " <> " + pagePos + " " + DataUtils.getPageChunkId(page.getPos()) + " " + version;
+                    assert page == null || (page.getPos() & ~1) == (pagePos & ~1) : page.getPos() + " <> " + pagePos + " " + DataUtils.getPageChunkId(page.getPos()) + " " + version;
                     if (--count >= 0) {
+                        pagePos &= ~1;
+                        if (singleWriter) {
+                            pagePos |= 1;
+                        }
                         positions[count] = pagePos;
                     } else {
                         assert store.getCurrentVersion() > version ||
@@ -640,20 +647,16 @@ public class MVMap<K, V> extends AbstractMap<K, V>
      */
     @Override
     public final boolean replace(K key, V oldValue, V newValue) {
-        return replace(key, oldValue, newValue, false);
-    }
-
-    public final boolean replace(K key, V oldValue, V newValue, boolean preLocked) {
         EqualsDecisionMaker<V> decisionMaker = new EqualsDecisionMaker<>(valueType, oldValue);
-        V result = operate(key, newValue, decisionMaker, preLocked);
+        V result = operate(key, newValue, decisionMaker);
         boolean res = decisionMaker.getDecision() != Decision.ABORT;
         assert !res || areValuesEqual(valueType, oldValue, result) : oldValue + " != " + result;
         return res;
     }
 
-    private boolean rewrite(K key, boolean preLocked) {
+    private boolean rewrite(K key) {
         ContainsDecisionMaker<V> decisionMaker = new ContainsDecisionMaker<>();
-        V result = operate(key, null, decisionMaker, preLocked);
+        V result = operate(key, null, decisionMaker);
         boolean res = decisionMaker.getDecision() != Decision.ABORT;
         assert res == (result != null);
         return res;
@@ -811,10 +814,11 @@ public class MVMap<K, V> extends AbstractMap<K, V>
     }
 
     private boolean rewritePage(Page p) {
+        assert !singleWriter;
         @SuppressWarnings("unchecked")
         K key = (K) p.getKey(0);
         if (!isClosed()) {
-            return rewrite(key, singleWriter);
+            return rewrite(key);
         }
         return true;
     }
@@ -1572,16 +1576,11 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 }
             }
             if (useRegularRemove) {
-                rootReference = lockRoot(rootReference, 1);
-                try {
-                    Page lastLeaf = rootReference.root.getAppendCursorPos(null).page;
-                    assert lastLeaf.isLeaf();
-                    assert lastLeaf.getKeyCount() > 0;
-                    Object key = lastLeaf.getKey(lastLeaf.getKeyCount() - 1);
-                    operate((K) key, null, DecisionMaker.REMOVE, true);
-                } finally {
-                    unlockRoot();
-                }
+                Page lastLeaf = rootReference.root.getAppendCursorPos(null).page;
+                assert lastLeaf.isLeaf();
+                assert lastLeaf.getKeyCount() > 0;
+                Object key = lastLeaf.getKey(lastLeaf.getKeyCount() - 1);
+                operate((K) key, null, DecisionMaker.REMOVE);
             }
         }
     }
@@ -1879,24 +1878,17 @@ public class MVMap<K, V> extends AbstractMap<K, V>
      * @param decisionMaker command object to make choices during transaction.
      * @return previous value, if mapping for that key existed, or null otherwise
      */
-    public V operate(K key, V value, DecisionMaker<? super V> decisionMaker) {
-        return operate(key, value, decisionMaker, false);
-    }
-
     @SuppressWarnings("unchecked")
-    public V operate(K key, V value, DecisionMaker<? super V> decisionMaker, boolean preLocked) {
-        assert !singleWriter || preLocked || !getRoot().lockedForUpdate;
+    public V operate(K key, V value, DecisionMaker<? super V> decisionMaker) {
         beforeWrite();
         IntValueHolder unsavedMemoryHolder = new IntValueHolder();
         int attempt = 0;
         while(true) {
-            RootReference rootReference = flushAndGetRoot(preLocked);
+            RootReference rootReference = flushAndGetRoot();
             RootReference lockedRootReference = null;
-            if (!preLocked) {
-                if (++attempt > 3 || rootReference.lockedForUpdate) {
-                    lockedRootReference = lockRoot(rootReference, attempt);
-                    rootReference = lockedRootReference;
-                }
+            if (++attempt > 3 || rootReference.lockedForUpdate) {
+                lockedRootReference = lockRoot(rootReference, attempt);
+                rootReference = lockedRootReference;
             }
             Page rootPage = rootReference.root;
             long version = rootReference.version;
@@ -2011,12 +2003,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 }
                 rootPage = replacePage(pos, p, unsavedMemoryHolder);
                 RootReference updatedRootReference;
-                if (preLocked) {
-                    updatedRootReference = rootReference.updatePageAndLockedStatus(rootPage, attempt, true, isPersistent() ? tip : null);
-                    if (!root.compareAndSet(rootReference, updatedRootReference)) {
-                        throw new IllegalStateException("Unable to update pre-locked root");
-                    }
-                } else if (lockedRootReference == null) {
+                if (lockedRootReference == null) {
                     if ((updatedRootReference = getUpdatedRoot(rootReference, rootPage, attempt, isPersistent() ? tip : null)) == null) {
                         decisionMaker.reset();
                         continue;
@@ -2067,16 +2054,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         }
     }
 
-    public void runUnderLockedRoot(Runnable action) {
-        lockRoot(flushAndGetRoot(), 1);
-        try {
-            action.run();
-        } finally {
-            unlockRoot();
-        }
-    }
-
-    RootReference lockRoot(RootReference rootReference, int attempt) {
+    private RootReference lockRoot(RootReference rootReference, int attempt) {
         while(true) {
             RootReference lockedRootReference = tryLock(rootReference, attempt++);
             if (lockedRootReference != null) {

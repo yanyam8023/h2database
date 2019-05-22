@@ -127,10 +127,11 @@ public class FreeSpaceBitSet {
                         "Double alloc: " + Integer.toHexString(start) + "/" + Integer.toHexString(blocks) + " " + this;
                 if (allocate) {
                     set.set(start, start + blocks);
-                }
-                failureFlags <<= 1;
-                if (end < 0) {
-                    failureFlags |= 1;
+                } else {
+                    failureFlags <<= 1;
+                    if (end < 0) {
+                        failureFlags |= 1;
+                    }
                 }
                 return getPos(start);
             }

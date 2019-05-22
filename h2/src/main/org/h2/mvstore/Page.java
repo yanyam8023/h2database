@@ -785,6 +785,9 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
         if (!isDeleted) {
             chunk.maxLenLive += max;
             chunk.pageCountLive++;
+            if (map.isSingleWriter()) {
+                chunk.pinCount++;
+            }
 //            assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.put(pos, getMapId()) == null;
 //            assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.size() == chunk.pageCountLive;
         }
@@ -945,7 +948,11 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
      */
     public void visitPages(Visitor visitor) {
         if (getTotalCount() > 0) {
-            visitor.visit(this, pos);
+            long pagePos = this.pos & ~1;
+            if (map.isSingleWriter()) {
+                pagePos |= 1;
+            }
+            visitor.visit(this, pagePos);
         }
     }
 
@@ -1308,6 +1315,9 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
 //                    if (page == null) {
 //                        page = getChildPage(i);
 //                    }
+                    if (map.isSingleWriter()) {
+                        pagePos |= 1;
+                    }
                     visitor.visit(page, pagePos);
                 } else {
                     if (page == null) {

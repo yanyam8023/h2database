@@ -175,7 +175,8 @@ public final class MVRTreeMap<V> extends MVMap<SpatialKey, V> {
                         @Override
                         public void visitPages(Page.Visitor visitor) {
                             for (Page page : removedPages) {
-                                visitor.visit(page, page.getPos());
+                                long pagePos = page.getPos() & ~1;
+                                visitor.visit(page, pagePos);
                             }
                         }
                     };

@@ -116,6 +116,11 @@ public class Chunk {
      */
     public long next;
 
+    /**
+     * Number of live pinned pages.
+     */
+    public int pinCount;
+
 //    public Map<Long,Integer> pagePosToMapId = Collections.synchronizedMap(new HashMap<Long,Integer>());
 
     Chunk(int id) {
@@ -206,6 +211,7 @@ public class Chunk {
         c.unusedAtVersion = DataUtils.readHexLong(map, "unusedAtVersion", 0);
         c.version = DataUtils.readHexLong(map, "version", id);
         c.next = DataUtils.readHexLong(map, "next", 0);
+        c.pinCount = DataUtils.readHexInt(map, "pinCount", 0);
 //        c.pagePosToMapId = null;
         return c;
     }
@@ -266,6 +272,7 @@ public class Chunk {
             DataUtils.appendMap(buff, "unusedAtVersion", unusedAtVersion);
         }
         DataUtils.appendMap(buff, "version", version);
+        DataUtils.appendMap(buff, "pinVount", pinCount);
         return buff.toString();
     }
 

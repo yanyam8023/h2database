@@ -611,20 +611,15 @@ public class TransactionStore {
      * @param maxLogId the last log id
      * @param toLogId the log id to roll back to
      */
-    void rollbackTo(final Transaction t, final long maxLogId, final long toLogId) {
-        final int transactionId = t.getId();
-        final MVMap<Long, Object[]> undoLog = undoLogs[transactionId];
-        undoLog.runUnderLockedRoot(new Runnable() {
-            @Override
-            public void run() {
-                RollbackDecisionMaker decisionMaker = new RollbackDecisionMaker(TransactionStore.this, transactionId, toLogId, t.listener);
-                for (long logId = maxLogId - 1; logId >= toLogId; logId--) {
-                    Long undoKey = getOperationId(transactionId, logId);
-                    undoLog.operate(undoKey, null, decisionMaker, true);
-                    decisionMaker.reset();
-                }
-            }
-        });
+    void rollbackTo(Transaction t, long maxLogId, long toLogId) {
+        int transactionId = t.getId();
+        MVMap<Long, Object[]> undoLog = undoLogs[transactionId];
+        RollbackDecisionMaker decisionMaker = new RollbackDecisionMaker(TransactionStore.this, transactionId, toLogId, t.listener);
+        for (long logId = maxLogId - 1; logId >= toLogId; logId--) {
+            Long undoKey = getOperationId(transactionId, logId);
+            undoLog.operate(undoKey, null, decisionMaker);
+            decisionMaker.reset();
+        }
     }
 
     /**

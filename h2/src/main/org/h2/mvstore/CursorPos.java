@@ -43,7 +43,10 @@ public class CursorPos implements RootReference.VisitablePages
             Page page = head.page;
 //            if (page != null) {
                 if (page.getTotalCount() > 0 || !page.isLeaf()) {
-                    long pagePos = page.getPos();
+                    long pagePos = page.getPos() & ~1;
+                    if (page.map.isSingleWriter()) {
+                        pagePos |= 1;
+                    }
                     visitor.visit(page, pagePos);
                 }
 //            } else {
@@ -85,6 +88,10 @@ public class CursorPos implements RootReference.VisitablePages
                     assert page.map.store.getCurrentVersion() > version ||
                             version >= page.map.store.getLastStoredVersion() + 1;
                     return this;
+                }
+                pagePos &= ~1;
+                if (page.map.isSingleWriter()) {
+                    pagePos |= 1;
                 }
                 positions[count] = pagePos;
             }
