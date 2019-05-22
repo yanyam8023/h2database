@@ -31,6 +31,7 @@ public class CursorPos implements RootReference.VisitablePages
      */
     public CursorPos parent;
 
+
     public CursorPos(Page page, int index, CursorPos parent) {
         this.page = page;
         this.index = index;
@@ -41,20 +42,10 @@ public class CursorPos implements RootReference.VisitablePages
     public void visitPages(Page.Visitor visitor) {
         for (CursorPos head = this; head != null; head = head.parent) {
             Page page = head.page;
-//            if (page != null) {
-                if (page.getTotalCount() > 0 || !page.isLeaf()) {
-                    long pagePos = page.getPos() & ~1;
-                    if (page.map.isSingleWriter()) {
-                        pagePos |= 1;
-                    }
-                    visitor.visit(page, pagePos);
-                }
-//            } else {
-//                int chunkId = head.index >>> 5;
-//                int length = DataUtils.getPageMaxLength(head.index << 1);
-//                long pagePos = DataUtils.getPagePos(chunkId, 0, length, 0);
-//                visitor.visit(null, pagePos);
-//            }
+            if (page.getTotalCount() > 0 || !page.isLeaf()) {
+                long pagePos = DataUtils.createRemovedPagePos(page.getPos(), page.map.isSingleWriter());
+                visitor.visit(page, pagePos);
+            }
         }
     }
 
@@ -85,77 +76,14 @@ public class CursorPos implements RootReference.VisitablePages
             long pagePos = page.getPos();
             if (DataUtils.isPageSaved(pagePos) && DataUtils.getPageChunkId(pagePos) <= version) {
                 if (--count < 0) {
-                    assert page.map.store.getCurrentVersion() > version ||
-                            version >= page.map.store.getLastStoredVersion() + 1;
+                    assert !(page.map.store.getCurrentVersion() <= version &&
+                            version < page.map.store.getLastStoredVersion() + 1);
                     return this;
                 }
-                pagePos &= ~1;
-                if (page.map.isSingleWriter()) {
-                    pagePos |= 1;
-                }
-                positions[count] = pagePos;
+                positions[count] = DataUtils.createRemovedPagePos(pagePos, page.map.isSingleWriter());
             }
         }
         return new RootReference.RemovalInfo(positions);
-    }
-
-    int calculateUnsavedMemoryAdjustment() {
-        int unsavedMemory = 0;
-        for (CursorPos head = this; head != null; head = head.parent) {
-            Page page = head.page;
-            if (!page.isSaved() && page.getTotalCount() > 0) {
-                unsavedMemory += page.getMemory();
-            }
-        }
-        return unsavedMemory;
-    }
-
-    void dropSavedDeletedPages(MVMap.IntValueHolder unsavedMemoryHolder, long version) {
-        int unsavedMemory = 0;
-        for (CursorPos head = this; head != null; head = head.parent) {
-            Page page = head.page;
-            if (page.getTotalCount() > 0) {
-                if (page.isSaved()) {
-                    long pagePos = page.getPos();
-                    int chunkId = DataUtils.getPageChunkId(pagePos);
-                    if (chunkId <= version) {
-                        head.index = (int)((pagePos >> 1) & 31) | (int)(pagePos >>> 33);
-                        head.page = null;
-                    }
-                } else {
-                    unsavedMemory += page.getMemory();
-                }
-            }
-        }
-        unsavedMemoryHolder.value -= unsavedMemory;
-    }
-
-    long[] collectRemovedPagePositions(MVMap.IntValueHolder unsavedMemoryHolder, long version) {
-        int count = 0;
-        int unsavedMemory = 0;
-        for (CursorPos head = this; head != null; head = head.parent) {
-            Page page = head.page;
-            if (page.isSaved()) {
-                if (DataUtils.getPageChunkId(page.getPos()) <= version) {
-                    ++count;
-                }
-            } else {
-                unsavedMemory += page.getMemory();
-            }
-        }
-        unsavedMemoryHolder.value -= unsavedMemory;
-        if (count == 0) {
-            return null;
-        }
-        long[] positions = new long[count];
-        count = 0;
-        for (CursorPos head = this; head != null; head = head.parent) {
-            long pagePos = head.page.getPos();
-            if (DataUtils.isPageSaved(pagePos) && DataUtils.getPageChunkId(pagePos) <= version) {
-                positions[count++] = pagePos;
-            }
-        }
-        return positions;
     }
 }
 

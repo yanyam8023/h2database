@@ -217,8 +217,7 @@ public class MVStore implements AutoCloseable {
     /**
      * The map of chunks.
      */
-    final ConcurrentHashMap<Integer, Chunk> chunks =
-            new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Integer, Chunk> chunks = new ConcurrentHashMap<>();
 
     private long updateCounter = 0;
     private long updateAttemptCounter = 0;
@@ -228,8 +227,7 @@ public class MVStore implements AutoCloseable {
      */
     private final MVMap<String, String> meta;
 
-    private final ConcurrentHashMap<Integer, MVMap<?, ?>> maps =
-            new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Integer, MVMap<?, ?>> maps = new ConcurrentHashMap<>();
 
     private final HashMap<String, Object> storeHeader = new HashMap<>();
 
@@ -1039,10 +1037,6 @@ public class MVStore implements AutoCloseable {
                                 doMaintance();
                                 shrinkFileIfPossible(0);
                                 assert validateFileLength("on close");
-//                                System.out.println("On close of " + System.identityHashCode(this) +
-//                                                    ": fill rate: " + getFileStore().getFillRate() +
-//                                                    "%, chunk fill rate: " + getChunksFillRate() +
-//                                                    "%, file size: " + fileStore.getFileLengthInUse());
                             }
 
                             state = STATE_CLOSING;
@@ -1674,8 +1668,8 @@ public class MVStore implements AutoCloseable {
         return c.unusedAtVersion != 0 && c.unusedAtVersion <= oldestVersionToKeep;
     }
 
-    private boolean isRecentChunk(Chunk chunk, long time) {
-        return retentionTime >= 0 && chunk.time + retentionTime > time;
+    private boolean isSeasonedChunk(Chunk chunk, long time) {
+        return retentionTime < 0 || chunk.time + retentionTime <= time;
     }
 
     private long getTimeSinceCreation() {
@@ -2070,7 +2064,7 @@ public class MVStore implements AutoCloseable {
         long time = getTimeSinceCreation();
         for (Chunk c : chunks.values()) {
             assert c.maxLen >= 0;
-            if (!isRecentChunk(c, time) && c.isEvacuatable()) {
+            if (isSeasonedChunk(c, time) && c.isEvacuatable()) {
                 maxLengthSum += c.maxLen;
                 if (c.pageCountLive > 0 && c.pageCountLive < c.pageCount) {
                     maxLengthLiveSum += c.maxLenLive;
@@ -2107,7 +2101,7 @@ public class MVStore implements AutoCloseable {
             // now we don't do that)
             int liveCount = chunk.pageCountLive;
             if (liveCount > 0 && liveCount < chunk.pageCount && chunk.isEvacuatable() &&
-                    chunk.isSaved() && !isRecentChunk(chunk, time)) {
+                    chunk.isSaved() && isSeasonedChunk(chunk, time)) {
                 long age = latestVersion - chunk.version;
                 chunk.collectPriority = (int) (chunk.getFillRate() * 1000 / age);
                 totalSize += chunk.maxLenLive;
@@ -3143,7 +3137,7 @@ public class MVStore implements AutoCloseable {
         long time = getTimeSinceCreation();
         int count = 0;
         for (Chunk chunk : chunks.values()) {
-            if (!isRecentChunk(chunk, time) && canOverwriteChunk(chunk, oldestVersionToKeep)) {
+            if (isSeasonedChunk(chunk, time) && canOverwriteChunk(chunk, oldestVersionToKeep)) {
                 if (meta.remove(Chunk.getMetaKey(chunk.id)) != null) {
                     markMetaChanged();
                 }

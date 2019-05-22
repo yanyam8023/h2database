@@ -561,6 +561,21 @@ public final class DataUtils {
     }
 
     /**
+     * Transforms saved page position into removed page info, by re-purposing
+     * "removed" / "page type" / bit as "pinned page" flag
+     * @param pagePos of the saved page
+     * @param isPinned whether page belong to a "single writer" map
+     * @return removed page info that contains at least chunk id, page length and pinned flag
+     */
+    public static long createRemovedPagePos(long pagePos, boolean isPinned) {
+        pagePos &= ~1;
+        if (isPinned) {
+            pagePos = 1;
+        }
+        return pagePos;
+    }
+
+    /**
      * Find out if page was removed.
      *
      * @param pos the position
