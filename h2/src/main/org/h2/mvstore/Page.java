@@ -1312,9 +1312,6 @@ public abstract class Page implements Cloneable, RootReference.VisitablePages
                 long pagePos = ref.getPos();
                 Page page = ref.getPage();
                 if (page == null ? DataUtils.isLeafPosition(pagePos) : page.isLeaf()) {
-//                    if (page == null) {
-//                        page = getChildPage(i);
-//                    }
                     if (map.isSingleWriter()) {
                         pagePos |= 1;
                     }

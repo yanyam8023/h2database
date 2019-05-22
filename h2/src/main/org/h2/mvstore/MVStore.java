@@ -2070,7 +2070,7 @@ public class MVStore implements AutoCloseable {
         long time = getTimeSinceCreation();
         for (Chunk c : chunks.values()) {
             assert c.maxLen >= 0;
-            if (!isRecentChunk(c, time) && c.pinCount == 0) {
+            if (!isRecentChunk(c, time) && c.isEvacuatable()) {
                 maxLengthSum += c.maxLen;
                 if (c.pageCountLive > 0 && c.pageCountLive < c.pageCount) {
                     maxLengthLiveSum += c.maxLenLive;
@@ -2106,8 +2106,8 @@ public class MVStore implements AutoCloseable {
             // (it's possible to compact chunks earlier, but right
             // now we don't do that)
             int liveCount = chunk.pageCountLive;
-            if (liveCount > 0 && liveCount < chunk.pageCount &&
-                    chunk.isSaved() && !isRecentChunk(chunk, time) && chunk.pinCount == 0) {
+            if (liveCount > 0 && liveCount < chunk.pageCount && chunk.isEvacuatable() &&
+                    chunk.isSaved() && !isRecentChunk(chunk, time)) {
                 long age = latestVersion - chunk.version;
                 chunk.collectPriority = (int) (chunk.getFillRate() * 1000 / age);
                 totalSize += chunk.maxLenLive;
@@ -2223,7 +2223,7 @@ public class MVStore implements AutoCloseable {
 //                        : chunk + " " + pagePos + " " + chunk.pagePosToMapId;
 
                 if (chunk.pageCountLive == 0 /*&& chunk.maxLenLive == 0*/) {
-                    assert chunk.pinCount == 0;
+                    assert chunk.isEvacuatable() : chunk;
                     chunk.unusedAtVersion = version;
                     if (time == 0) {
                         time = getTimeSinceCreation();

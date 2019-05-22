@@ -119,7 +119,7 @@ public class Chunk {
     /**
      * Number of live pinned pages.
      */
-    public int pinCount;
+    int pinCount;
 
 //    public Map<Long,Integer> pagePosToMapId = Collections.synchronizedMap(new HashMap<Long,Integer>());
 
@@ -272,7 +272,7 @@ public class Chunk {
             DataUtils.appendMap(buff, "unusedAtVersion", unusedAtVersion);
         }
         DataUtils.appendMap(buff, "version", version);
-        DataUtils.appendMap(buff, "pinVount", pinCount);
+        DataUtils.appendMap(buff, "pinCount", pinCount);
         return buff.toString();
     }
 
@@ -293,6 +293,10 @@ public class Chunk {
 
     boolean isSaved() {
         return block != Long.MAX_VALUE;
+    }
+
+    boolean isEvacuatable() {
+        return pinCount == 0;
     }
 
     ByteBuffer readBufferForPage(FileStore fileStore, long pos, int expectedMapId) {
