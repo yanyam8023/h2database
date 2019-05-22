@@ -2788,6 +2788,7 @@ public class MVStore implements AutoCloseable {
         }
     }
 
+//    private void doMaintance() {}
     private void doMaintance() {
         if (autoCompactFillRate > 0 && lastChunk != null && reuseSpace) {
             int thresholdRate = autoCompactFillRate;

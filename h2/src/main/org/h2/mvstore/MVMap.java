@@ -1160,19 +1160,14 @@ public class MVMap<K, V> extends AbstractMap<K, V>
             }
 
             RootReference lockedRootReference = null;
-            if (++attempt > 3 || rootReference.lockedForUpdate) {
+            if (++attempt > 3 || rootReference.isLocked()) {
                 lockedRootReference = lockRoot(rootReference, attempt);
                 rootReference = flushAndGetRoot(true);
             }
 
             try {
-                RootReference previous = rootReference;
-                RootReference tmp;
-                while ((tmp = previous.previous) != null && tmp.root == rootReference.root) {
-                    previous = tmp;
-                }
-                RootReference updatedRootReference = previous.unlockAndUpdateVersion(writeVersion, attempt);
-                if (root.compareAndSet(rootReference, updatedRootReference)) {
+                RootReference updatedRootReference = rootReference.unlockAndUpdateVersion(writeVersion, attempt);
+                if (updatedRootReference != null) {
                     lockedRootReference = null;
                     if (clearRemovalInfo) {
                         rootReference.extractRemovalInfo();
@@ -1765,7 +1760,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         while(true) {
             RootReference rootReference = flushAndGetRoot();
             RootReference lockedRootReference = null;
-            if (++attempt > 3 || rootReference.lockedForUpdate) {
+            if (++attempt > 3 || rootReference.isLocked()) {
                 lockedRootReference = lockRoot(rootReference, attempt);
                 rootReference = lockedRootReference;
             }
@@ -1931,9 +1926,9 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         }
 
         if(attempt > 4) {
-            if (attempt <= 12) {
+            if (attempt <= 10) {
                 Thread.yield();
-            } else if (attempt <= 70 - 2 * contention) {
+            } else if (attempt <= 50 - 2 * contention) {
                 try {
                     Thread.sleep(contention);
                 } catch (InterruptedException ex) {
@@ -1943,7 +1938,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 synchronized (lock) {
                     notificationRequested = true;
                     try {
-                        lock.wait(5);
+                        lock.wait(15);
                     } catch (InterruptedException ignore) {
                     }
                 }
@@ -1973,7 +1968,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         boolean success;
         do {
             RootReference rootReference = getRoot();
-            assert rootReference.lockedForUpdate;
+            assert rootReference.isLocked();
             updatedRootReference = rootReference.updatePageAndLockedStatus(
                                         newRootPage == null ? rootReference.root : newRootPage,
                                         appendCounter == -1 ? rootReference.getAppendCounter() : appendCounter,

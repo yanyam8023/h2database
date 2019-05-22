@@ -24,9 +24,13 @@ public final class RootReference
      */
     public final long version;
     /**
-     * Indicator that map is locked for update.
+     * Counter of reenterant locks.
      */
-    final boolean lockedForUpdate;
+    private final byte holdCount;
+    /**
+     * Lock owner thread id.
+     */
+    private final long ownerId;
     /**
      * Reference to the previous root in the chain.
      * That is the last root of the previous version, which had any data changes.
@@ -59,7 +63,8 @@ public final class RootReference
         this.previous = null;
         this.updateCounter = 1;
         this.updateAttemptCounter = 1;
-        this.lockedForUpdate = false;
+        this.holdCount = 0;
+        this.ownerId = 0;
         this.appendCounter = 0;
         this.removalInfo = null;
     }
@@ -70,7 +75,8 @@ public final class RootReference
         this.previous = r.previous;
         this.updateCounter = r.updateCounter + 1;
         this.updateAttemptCounter = r.updateAttemptCounter + updateAttemptCounter;
-        this.lockedForUpdate = false;
+        this.holdCount = 0;
+        this.ownerId = 0;
         this.appendCounter = r.appendCounter;
         this.removalInfo = removedPositions == null ? r.removalInfo :
                                                     new RemovalInfoNode(removedPositions, r.removalInfo);
@@ -83,8 +89,9 @@ public final class RootReference
         this.previous = r.previous;
         this.updateCounter = r.updateCounter + 1;
         this.updateAttemptCounter = r.updateAttemptCounter + attempt;
-        assert !r.lockedForUpdate;
-        this.lockedForUpdate = true;
+        assert r.holdCount == 0 || r.ownerId == Thread.currentThread().getId() : Thread.currentThread().getId() + " " + r;
+        this.holdCount = (byte)(r.holdCount + 1);
+        this.ownerId = Thread.currentThread().getId();
         this.appendCounter = r.appendCounter;
         this.removalInfo = r.removalInfo;
     }
@@ -97,8 +104,9 @@ public final class RootReference
         this.previous = r.previous;
         this.updateCounter = r.updateCounter;
         this.updateAttemptCounter = r.updateAttemptCounter;
-        assert r.lockedForUpdate;
-        this.lockedForUpdate = lockedForUpdate;
+        assert r.holdCount > 0 && r.ownerId == Thread.currentThread().getId() : Thread.currentThread().getId() + " " + r;
+        this.holdCount = (byte)(r.holdCount - (lockedForUpdate ? 0 : 1));
+        this.ownerId = this.holdCount == 0 ? 0 : Thread.currentThread().getId();
         this.appendCounter = (byte) appendCounter;
         this.removalInfo = removedPositions == null ? r.removalInfo :
                                                     new RemovalInfoNode(removedPositions, r.removalInfo);
@@ -111,14 +119,15 @@ public final class RootReference
         this.previous = r;
         this.updateCounter = r.updateCounter + 1;
         this.updateAttemptCounter = r.updateAttemptCounter + attempt;
-        this.lockedForUpdate = false;
+        this.holdCount = 0;
+        this.ownerId = 0;
         assert r.appendCounter == 0;
         this.appendCounter = 0;
         this.removalInfo = null;
     }
 
     RootReference updateRootPage(Page page, long attemptCounter, VisitablePages removedPositions) {
-        if (!lockedForUpdate) {
+        if (holdCount == 0) {
             RootReference updatedRootReference = new RootReference(this, page, attemptCounter, removedPositions);
             if (page.map.compareAndSetRoot(this, updatedRootReference)) {
                 return updatedRootReference;
@@ -128,7 +137,7 @@ public final class RootReference
     }
 
     RootReference tryLock(int attemptCounter) {
-        if (!lockedForUpdate) {
+        if (holdCount == 0 || ownerId == Thread.currentThread().getId()) {
             RootReference lockedRootReference = new RootReference(this, attemptCounter);
             if (root.map.compareAndSetRoot(this, lockedRootReference)) {
                 return lockedRootReference;
@@ -138,7 +147,17 @@ public final class RootReference
     }
 
     RootReference unlockAndUpdateVersion(long version, int attempt) {
-        return new RootReference(this, version, attempt);
+        assert holdCount == 0 || ownerId == Thread.currentThread().getId() : Thread.currentThread().getId() + " " + this;
+        RootReference previous = this;
+        RootReference tmp;
+        while ((tmp = previous.previous) != null && tmp.root == root) {
+            previous = tmp;
+        }
+        RootReference updatedRootReference = new RootReference(previous, version, attempt);
+        if (root.map.compareAndSetRoot(this, updatedRootReference)) {
+            return updatedRootReference;
+        }
+        return null;
     }
 
     RootReference updatePageAndLockedStatus(Page page, int appendCounter, boolean lockedForUpdate, VisitablePages removedPositions) {
@@ -158,6 +177,10 @@ public final class RootReference
                 rootRef.previous = null;
             }
         }
+    }
+
+    boolean isLocked() {
+        return holdCount != 0;
     }
 
     long getVersion() {
@@ -194,7 +217,7 @@ public final class RootReference
 
     @Override
     public String toString() {
-        return "RootReference{" + System.identityHashCode(root) + "," + version + "," + lockedForUpdate +
+        return "RootReference{" + System.identityHashCode(root) + "," + version + "," + ownerId + ":" + holdCount +
                 "," + getAppendCounter() + ", " + (removalInfo == null ? "null" : "rinf") + "}";
     }
 
