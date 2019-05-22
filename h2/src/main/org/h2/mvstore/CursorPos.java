@@ -76,8 +76,7 @@ public class CursorPos implements RootReference.VisitablePages
             long pagePos = page.getPos();
             if (DataUtils.isPageSaved(pagePos) && DataUtils.getPageChunkId(pagePos) <= version) {
                 if (--count < 0) {
-                    assert !(page.map.store.getCurrentVersion() <= version &&
-                            version < page.map.store.getLastStoredVersion() + 1);
+                    assert !page.map.store.isNoStoreInProgressFor(version);
                     return this;
                 }
                 positions[count] = DataUtils.createRemovedPagePos(pagePos, page.map.isSingleWriter());

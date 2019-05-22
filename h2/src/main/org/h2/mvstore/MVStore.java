@@ -2127,11 +2127,6 @@ public class MVStore implements AutoCloseable {
         sync();
 
         int rewritedPageCount = 0;
-//        for (MVMap<?, ?> map : maps.values()) {
-//            if (!map.isClosed() && map.isSingleWriter()) {
-//                rewritedPageCount += map.rewrite(set);
-//            }
-//        }
         storeLock.unlock();
         try {
             for (MVMap<?, ?> map : maps.values()) {
@@ -2213,10 +2208,7 @@ public class MVStore implements AutoCloseable {
                 assert chunk.maxLenLive >= 0 : chunk;
                 assert (chunk.pageCountLive == 0) == (chunk.maxLenLive == 0) : chunk;
 
-//                assert chunk.pagePosToMapId == null || chunk.pagePosToMapId.remove(pagePos) != null
-//                        : chunk + " " + pagePos + " " + chunk.pagePosToMapId;
-
-                if (chunk.pageCountLive == 0 /*&& chunk.maxLenLive == 0*/) {
+                if (chunk.pageCountLive == 0) {
                     assert chunk.isEvacuatable() : chunk;
                     chunk.unusedAtVersion = version;
                     if (time == 0) {
@@ -2626,13 +2618,11 @@ public class MVStore implements AutoCloseable {
         return currentVersion;
     }
 
-    public long getLastStoredVersion() {
-        return lastStoredVersion;
+    boolean isNoStoreInProgressFor(long version) {
+        return currentVersion == version            // store for version has not started yet
+            && lastStoredVersion == version - 1;    // store for version-1 already finished
     }
 
-    public int getLastChunkId() {
-        return lastChunk == null ? (int)INITIAL_VERSION : lastChunk.id;
-    }
 
     /**
      * Get the file store.
