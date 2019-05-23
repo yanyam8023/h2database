@@ -115,6 +115,7 @@ public class TestMultiThread extends TestDb implements Runnable {
         String db = getTestName();
         deleteDb(db);
         final String url = getURL(db + ";MULTI_THREADED=1", true);
+        Exception exception = null;
         try (Connection conn = getConnection(url)) {
             Statement stat = conn.createStatement();
             stat.execute("create table test(id identity, data clob)");
@@ -139,9 +140,14 @@ public class TestMultiThread extends TestDb implements Runnable {
             }
             Thread.sleep(500);
             for (Task t : tasks) {
-                t.get();
+                Exception ex = t.getException();
+                if (ex != null) {
+                    ex.printStackTrace();
+                    exception = ex;
+                }
             }
         }
+        assertNull(exception);
     }
 
     private void testConcurrentView() throws Exception {
@@ -422,7 +428,11 @@ public class TestMultiThread extends TestDb implements Runnable {
             }
             // check for exceptions
             for (Future<Void> job : jobs) {
-                job.get(5, TimeUnit.MINUTES);
+                try {
+                    job.get(5, TimeUnit.MINUTES);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
             }
         } finally {
             IOUtils.closeSilently(conn);
