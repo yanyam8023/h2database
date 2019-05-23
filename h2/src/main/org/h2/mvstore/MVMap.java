@@ -1760,7 +1760,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         while(true) {
             RootReference rootReference = flushAndGetRoot();
             RootReference lockedRootReference = null;
-            if (++attempt > 3 || rootReference.isLocked()) {
+            if (++attempt > 4 || rootReference.isLocked()) {
                 lockedRootReference = lockRoot(rootReference, attempt);
                 rootReference = lockedRootReference;
             }
@@ -1926,9 +1926,9 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         }
 
         if(attempt > 4) {
-            if (attempt <= 10) {
+            if (attempt <= 12 - contention) {
                 Thread.yield();
-            } else if (attempt <= 50 - 2 * contention) {
+            } else if (attempt <= 90 - 3 * contention) {
                 try {
                     Thread.sleep(contention);
                 } catch (InterruptedException ex) {
@@ -1938,7 +1938,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
                 synchronized (lock) {
                     notificationRequested = true;
                     try {
-                        lock.wait(15);
+                        lock.wait(100);
                     } catch (InterruptedException ignore) {
                     }
                 }
@@ -1984,7 +1984,7 @@ public class MVMap<K, V> extends AbstractMap<K, V>
         if (notificationRequested) {
             synchronized (lock) {
                 notificationRequested = false;
-                lock.notify();
+                lock.notifyAll();
             }
         }
     }
