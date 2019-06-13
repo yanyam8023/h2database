@@ -152,7 +152,7 @@ public class StringUtils {
                 builder.setLength(builderLength);
                 builder.append("STRINGDECODE('");
                 javaEncode(s, builder, true);
-                return builder.append("')");
+                //return builder.append("')"); 中文乱码问题
             }
             builder.append(c);
         }
